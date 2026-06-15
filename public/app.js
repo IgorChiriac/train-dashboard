@@ -109,7 +109,7 @@ function walkDest() { return intInput(els.walkDestInput); }
 
 function defaultPresetId() {
   const h = new Date().getHours();
-  return h >= 3 && h < 14 ? "toWork" : "toHome"; // morning → work, afternoon → home
+  return h >= 3 && h < 12 ? "toWork" : "toHome"; // before noon → work, noon onward → home
 }
 
 /* ---------- apply a preset to the UI ---------- */
