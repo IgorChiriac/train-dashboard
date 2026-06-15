@@ -141,7 +141,11 @@ function applyPreset(id) {
 /* ---------- API helpers ---------- */
 
 function buildUrl(from, to) {
-  const params = new URLSearchParams({ from, to, limit: String(LIMIT) });
+  // direct=1 → only connections without a transfer. Request a few extra so the
+  // client-side guard still leaves enough to show.
+  const params = new URLSearchParams({
+    from, to, direct: "1", limit: String(LIMIT + 3),
+  });
   return `${API}?${params.toString()}`;
 }
 
@@ -321,7 +325,9 @@ async function loadDepartures() {
     const res = await fetch(buildUrl(p.origin.station, p.dest.station));
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    connections = (data.connections || []).filter((c) => c.from && c.from.departure);
+    connections = (data.connections || [])
+      .filter((c) => c.from && c.from.departure)
+      .filter((c) => (c.transfers || 0) === 0); // direct only
     lastFetchOk = true;
     render();
     const offline = !navigator.onLine;
