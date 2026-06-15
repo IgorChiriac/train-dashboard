@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🚆 Horgen → Zürich Enge</title>
+  <link rel="preconnect" href="https://transport.opendata.ch" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="app__header">
+      <div class="route" id="route">
+        <span class="route__from" id="fromLabel">Horgen</span>
+        <span class="route__arrow">→</span>
+        <span class="route__to" id="toLabel">Zürich Enge</span>
+      </div>
+      <p class="subtitle">Next 5 departures &middot; the quick <strong>S2</strong> is highlighted</p>
+    </header>
+
+    <section class="controls">
+      <label class="field">
+        <span>From</span>
+        <input id="fromInput" type="text" value="Horgen" autocomplete="off" />
+      </label>
+      <label class="field">
+        <span>To</span>
+        <input id="toInput" type="text" value="Zürich Enge" autocomplete="off" />
+      </label>
+      <button id="refreshBtn" class="btn" type="button">Refresh</button>
+    </section>
+
+    <section id="board" class="board" aria-live="polite">
+      <!-- departure cards injected here -->
+    </section>
+
+    <footer class="app__footer">
+      <span id="status" class="status">Loading departures…</span>
+      <span class="credit">Data: <a href="https://transport.opendata.ch" target="_blank" rel="noopener">transport.opendata.ch</a></span>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
