@@ -2,9 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>🚆 Horgen → Zürich Enge</title>
+  <meta name="description" content="Next 5 train departures with the quick S2 highlighted, walking time, live delays and weather." />
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0b1020" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="S2 Board" />
+
   <link rel="preconnect" href="https://transport.opendata.ch" />
+  <link rel="preconnect" href="https://api.open-meteo.com" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -25,6 +37,7 @@
         </span>
         <span id="updated" class="updated">—</span>
       </div>
+      <div id="weather" class="wchip" hidden></div>
     </header>
 
     <section class="controls">
@@ -32,12 +45,13 @@
         <span>From</span>
         <input id="fromInput" type="text" value="Horgen" autocomplete="off" />
       </label>
+      <button id="swapBtn" class="swap" type="button" aria-label="Swap direction" title="Swap direction (evening commute)">⇄</button>
       <label class="field">
         <span>To</span>
         <input id="toInput" type="text" value="Zürich Enge" autocomplete="off" />
       </label>
       <label class="field field--walk">
-        <span>🚶 Walk (min)</span>
+        <span id="walkLabelText">🚶 Walk (min)</span>
         <input id="walkInput" type="number" min="0" max="60" step="1" value="12" inputmode="numeric" />
       </label>
       <button id="refreshBtn" class="btn" type="button" aria-label="Refresh now">
@@ -52,7 +66,7 @@
 
     <footer class="app__footer">
       <span id="status" class="status">Loading departures…</span>
-      <span class="credit">Data: <a href="https://transport.opendata.ch" target="_blank" rel="noopener">transport.opendata.ch</a></span>
+      <span class="credit">Data: <a href="https://transport.opendata.ch" target="_blank" rel="noopener">transport.opendata.ch</a> &middot; <a href="https://open-meteo.com" target="_blank" rel="noopener">open-meteo</a></span>
     </footer>
   </main>
 

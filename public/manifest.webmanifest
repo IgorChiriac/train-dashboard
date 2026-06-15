@@ -1,0 +1,25 @@
+{
+  "name": "Horgen → Zürich Enge S2 Board",
+  "short_name": "S2 Board",
+  "description": "Next 5 train departures with the quick S2 highlighted, walking time, live delays and weather.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1020",
+  "theme_color": "#0b1020",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

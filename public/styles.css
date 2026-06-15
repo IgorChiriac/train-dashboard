@@ -307,7 +307,52 @@ body {
 .btn--loading .btn__spinner { display: inline-block; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.field--walk { flex: 0 0 110px; }
+.field--walk { flex: 0 0 150px; }
+
+/* ---------- direction swap button ---------- */
+
+.swap {
+  align-self: flex-end;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--accent);
+  font-size: 1.25rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.swap:hover { border-color: var(--accent); }
+.swap:active { transform: rotate(180deg) scale(0.95); }
+
+/* ---------- weather chip ---------- */
+
+.wchip {
+  margin-top: 12px;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  font-size: 0.85rem;
+}
+.wchip[hidden] { display: none; }
+.wchip__main { font-weight: 700; }
+.wchip__desc { color: var(--muted); }
+.wchip__warn {
+  font-weight: 700;
+  color: #06210f;
+  background: var(--accent);
+  padding: 2px 9px;
+  border-radius: 999px;
+}
 
 /* ---------- delay / punctuality chips ---------- */
 

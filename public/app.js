@@ -3,17 +3,34 @@
  *
  * Uses the free, CORS-enabled Swiss public-transport API:
  *   https://transport.opendata.ch/v1/connections
+ * Weather comes from the free Open-Meteo API (no key).
  *
  * Shows the next 5 connections, highlights the "quick" S2, factors in your
- * walking time to the station, and surfaces real-time delays.
+ * walking time to the station, surfaces real-time delays, supports a direction
+ * swap for the evening commute, warns about the weather on your walk, and works
+ * offline / installs as a PWA.
  */
 
 const API = "https://transport.opendata.ch/v1/connections";
+const GEO_API = "https://geocoding-api.open-meteo.com/v1/search";
+const WX_API = "https://api.open-meteo.com/v1/forecast";
 const QUICK_LINE = "S2";
 const LIMIT = 5;
 const REFRESH_MS = 60_000; // refresh data every 60s
 const TICK_MS = 1_000; // re-tick countdowns every second
+const WX_MS = 10 * 60_000; // re-fetch weather every 10 min
 const STORE_KEY = "horgen-enge-prefs";
+const DEFAULT_HOME = "Horgen";
+const DEFAULT_WORK = "Zürich Enge";
+const DEFAULT_WALK = 12;
+
+// Built-in coordinates so weather works out of the box for the usual stations.
+const KNOWN_COORDS = {
+  "Horgen": { lat: 47.2597, lon: 8.5958, label: "Horgen" },
+  "Horgen Oberdorf": { lat: 47.2647, lon: 8.6010, label: "Horgen Oberdorf" },
+  "Zürich Enge": { lat: 47.3642, lon: 8.5315, label: "Zürich Enge" },
+  "Zürich HB": { lat: 47.3779, lon: 8.5403, label: "Zürich HB" },
+};
 
 const els = {
   board: document.getElementById("board"),
@@ -22,43 +39,59 @@ const els = {
   fromInput: document.getElementById("fromInput"),
   toInput: document.getElementById("toInput"),
   walkInput: document.getElementById("walkInput"),
+  walkLabelText: document.getElementById("walkLabelText"),
+  swapBtn: document.getElementById("swapBtn"),
   fromLabel: document.getElementById("fromLabel"),
   toLabel: document.getElementById("toLabel"),
   refreshBtn: document.getElementById("refreshBtn"),
   refreshBar: document.getElementById("refreshBar"),
   liveDot: document.getElementById("liveDot"),
   liveText: document.getElementById("liveText"),
+  weather: document.getElementById("weather"),
 };
 
 let connections = [];
 let refreshTimer = null;
 let tickTimer = null;
 let lastFetchOk = false;
+let lastWeatherAt = 0;
+let prefs = { walks: {}, coords: {} };
 
 /* ---------- preferences ---------- */
 
 function loadPrefs() {
   try {
-    const p = JSON.parse(localStorage.getItem(STORE_KEY) || "{}");
-    if (p.from) els.fromInput.value = p.from;
-    if (p.to) els.toInput.value = p.to;
-    if (p.walk != null) els.walkInput.value = p.walk;
+    prefs = JSON.parse(localStorage.getItem(STORE_KEY) || "{}") || {};
+  } catch (_) {
+    prefs = {};
+  }
+  prefs.walks = prefs.walks || {};
+  prefs.coords = prefs.coords || {};
+}
+
+function persist() {
+  prefs.from = els.fromInput.value.trim();
+  prefs.to = els.toInput.value.trim();
+  prefs.walks[originName()] = walkMinutes();
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(prefs));
   } catch (_) { /* ignore */ }
 }
 
-function savePrefs() {
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({
-      from: els.fromInput.value.trim(),
-      to: els.toInput.value.trim(),
-      walk: walkMinutes(),
-    }));
-  } catch (_) { /* ignore */ }
+function originName() {
+  return els.fromInput.value.trim() || DEFAULT_HOME;
 }
 
 function walkMinutes() {
   const n = parseInt(els.walkInput.value, 10);
   return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+/** Point the walk input + label at the current origin's saved value. */
+function applyOriginWalk() {
+  const saved = prefs.walks[originName()];
+  els.walkInput.value = saved != null ? saved : DEFAULT_WALK;
+  els.walkLabelText.textContent = `🚶 Walk from ${originName()} (min)`;
 }
 
 /* ---------- API helpers ---------- */
@@ -140,14 +173,86 @@ function restartRefreshBar() {
   bar.style.animation = `deplete ${REFRESH_MS}ms linear forwards`;
 }
 
-/* ---------- fetch + render ---------- */
+/* ---------- weather ---------- */
+
+/** WMO weather code → emoji + short text. */
+function weatherInfo(code) {
+  if (code === 0) return { emoji: "☀️", text: "clear" };
+  if ([1, 2].includes(code)) return { emoji: "🌤️", text: "mostly sunny" };
+  if (code === 3) return { emoji: "☁️", text: "overcast" };
+  if ([45, 48].includes(code)) return { emoji: "🌫️", text: "fog" };
+  if ([51, 53, 55, 56, 57].includes(code)) return { emoji: "🌦️", text: "drizzle" };
+  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return { emoji: "🌧️", text: "rain" };
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return { emoji: "❄️", text: "snow" };
+  if ([95, 96, 99].includes(code)) return { emoji: "⛈️", text: "thunderstorm" };
+  return { emoji: "🌡️", text: "" };
+}
+
+const RAIN_CODES = [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99];
+const SNOW_CODES = [71, 73, 75, 77, 85, 86];
+
+async function resolveCoords(name) {
+  if (KNOWN_COORDS[name]) return KNOWN_COORDS[name];
+  if (prefs.coords[name]) return prefs.coords[name];
+  // Strip a leading city prefix like "Zürich " for a better geocoder hit.
+  const query = name.replace(/^Zürich\s+/i, "") || name;
+  const url = `${GEO_API}?name=${encodeURIComponent(query)}&count=1&language=en&format=json`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`geocode HTTP ${res.status}`);
+  const data = await res.json();
+  const r = data.results && data.results[0];
+  if (!r) throw new Error("no geocode result");
+  const c = { lat: r.latitude, lon: r.longitude, label: r.name };
+  prefs.coords[name] = c;
+  persist();
+  return c;
+}
+
+async function loadWeather(force = false) {
+  if (!force && Date.now() - lastWeatherAt < WX_MS) return;
+  try {
+    const c = await resolveCoords(originName());
+    const url = `${WX_API}?latitude=${c.lat}&longitude=${c.lon}` +
+      `&current=temperature_2m,precipitation,weather_code&timezone=auto`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`weather HTTP ${res.status}`);
+    const d = await res.json();
+    if (d.current) {
+      renderWeather(d.current, c.label);
+      lastWeatherAt = Date.now();
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+function renderWeather(cur, label) {
+  const code = cur.weather_code;
+  const temp = Math.round(cur.temperature_2m);
+  const info = weatherInfo(code);
+
+  let warn = "";
+  if (RAIN_CODES.includes(code) || (cur.precipitation || 0) > 0) {
+    warn = `<span class="wchip__warn">☔ take an umbrella</span>`;
+  } else if (SNOW_CODES.includes(code)) {
+    warn = `<span class="wchip__warn">🧥 snow — dress warm</span>`;
+  }
+
+  els.weather.innerHTML =
+    `<span class="wchip__main">${info.emoji} ${temp}°C</span>` +
+    `<span class="wchip__desc">${info.text}${label ? ` · ${label}` : ""}</span>` +
+    warn;
+  els.weather.hidden = false;
+}
+
+/* ---------- fetch + render departures ---------- */
 
 async function loadDepartures() {
-  const from = els.fromInput.value.trim() || "Horgen";
-  const to = els.toInput.value.trim() || "Zürich Enge";
+  const from = els.fromInput.value.trim() || DEFAULT_HOME;
+  const to = els.toInput.value.trim() || DEFAULT_WORK;
   els.fromLabel.textContent = from;
   els.toLabel.textContent = to;
-  savePrefs();
+  persist();
 
   setLive("loading");
   els.status.textContent = "Syncing departures…";
@@ -158,16 +263,22 @@ async function loadDepartures() {
     connections = (data.connections || []).filter((c) => c.from && c.from.departure);
     lastFetchOk = true;
     render();
-    setLive("ok");
+    const offline = !navigator.onLine;
+    setLive(offline ? "error" : "ok");
+    els.status.classList.remove("status--error");
     els.updated.textContent = `updated ${formatClockSec(new Date())}`;
-    els.status.textContent = `${connections.length} connections · auto-refresh 60s`;
+    els.status.textContent = offline
+      ? `${connections.length} connections · offline (cached)`
+      : `${connections.length} connections · auto-refresh 60s`;
     restartRefreshBar();
   } catch (err) {
     console.error(err);
     lastFetchOk = false;
     setLive("error");
     els.status.classList.add("status--error");
-    els.status.textContent = `Couldn't reach the timetable (${err.message}). Retrying…`;
+    els.status.textContent = navigator.onLine
+      ? `Couldn't reach the timetable (${err.message}). Retrying…`
+      : `Offline — no cached departures yet.`;
   }
 }
 
@@ -183,7 +294,6 @@ function render() {
     return;
   }
 
-  els.status.classList.remove("status--error");
   els.board.innerHTML = upcoming.map((conn) => cardHtml(conn, now)).join("");
 }
 
@@ -252,27 +362,74 @@ function cardHtml(conn, now) {
     </article>`;
 }
 
+/* ---------- direction swap ---------- */
+
+function swapDirection() {
+  const from = els.fromInput.value;
+  els.fromInput.value = els.toInput.value;
+  els.toInput.value = from;
+  applyOriginWalk();
+  loadDepartures();
+  loadWeather(true);
+}
+
 /* ---------- timers & events ---------- */
 
 function startTimers() {
   clearInterval(refreshTimer);
   clearInterval(tickTimer);
-  refreshTimer = setInterval(loadDepartures, REFRESH_MS);
+  refreshTimer = setInterval(() => {
+    loadDepartures();
+    loadWeather();
+  }, REFRESH_MS);
   tickTimer = setInterval(() => {
     if (connections.length && lastFetchOk) render();
   }, TICK_MS);
 }
 
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) loadDepartures();
+  if (!document.hidden) { loadDepartures(); loadWeather(); }
 });
+window.addEventListener("online", () => { loadDepartures(); loadWeather(true); });
+window.addEventListener("offline", () => setLive("error"));
 
-els.refreshBtn.addEventListener("click", loadDepartures);
-els.walkInput.addEventListener("input", () => { savePrefs(); if (connections.length) render(); });
+els.refreshBtn.addEventListener("click", () => { loadDepartures(); loadWeather(true); });
+els.swapBtn.addEventListener("click", swapDirection);
+els.walkInput.addEventListener("input", () => { persist(); if (connections.length) render(); });
+[els.fromInput, els.toInput].forEach((input) =>
+  input.addEventListener("change", () => { applyOriginWalk(); loadWeather(true); })
+);
 [els.fromInput, els.toInput].forEach((input) =>
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") loadDepartures(); })
 );
 
-loadPrefs();
-loadDepartures();
-startTimers();
+/* ---------- init ---------- */
+
+function init() {
+  const hadPrefs = !!localStorage.getItem(STORE_KEY);
+  loadPrefs();
+
+  if (hadPrefs && prefs.from && prefs.to) {
+    els.fromInput.value = prefs.from;
+    els.toInput.value = prefs.to;
+  } else {
+    // First visit: orient by time of day (morning = to work, else to home).
+    const h = new Date().getHours();
+    const toWork = h >= 3 && h < 14;
+    els.fromInput.value = toWork ? DEFAULT_HOME : DEFAULT_WORK;
+    els.toInput.value = toWork ? DEFAULT_WORK : DEFAULT_HOME;
+  }
+  applyOriginWalk();
+
+  loadDepartures();
+  loadWeather(true);
+  startTimers();
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () =>
+      navigator.serviceWorker.register("sw.js").catch((e) => console.error("SW", e))
+    );
+  }
+}
+
+init();
