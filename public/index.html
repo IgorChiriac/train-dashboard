@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>🚆 Horgen → Zürich Enge</title>
-  <meta name="description" content="Next 5 train departures with the quick S2 highlighted, walking time, live delays and weather." />
+  <title>🚆 Commute · Horgen ⇄ Zürich</title>
+  <meta name="description" content="Door-to-door commute board: walk, S2 train, walk — with live delays and a weather widget." />
 
   <!-- PWA -->
   <link rel="manifest" href="manifest.webmanifest" />
@@ -17,7 +17,7 @@
 
   <link rel="preconnect" href="https://transport.opendata.ch" />
   <link rel="preconnect" href="https://api.open-meteo.com" />
-  <link rel="stylesheet" href="styles.css?v=4" />
+  <link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
   <div id="refreshBar" class="refresh-bar" aria-hidden="true"></div>
@@ -25,11 +25,12 @@
   <main class="app">
     <header class="app__header">
       <div class="route" id="route">
-        <span class="route__from" id="fromLabel">Horgen</span>
+        <span class="route__from" id="fromLabel">Home</span>
         <span class="route__arrow">→</span>
-        <span class="route__to" id="toLabel">Zürich Enge</span>
+        <span class="route__to" id="toLabel">Office</span>
       </div>
-      <p class="subtitle">Next 5 departures &middot; the quick <strong>S2</strong> is highlighted</p>
+      <p class="subtitle">Door-to-door · the quick <strong>S2</strong> is highlighted</p>
+      <p id="journeyLine" class="journey">—</p>
       <div class="livebar">
         <span id="liveDot" class="live live--ok">
           <span class="live__dot"></span>
@@ -37,22 +38,23 @@
         </span>
         <span id="updated" class="updated">—</span>
       </div>
-      <div id="weather" class="wchip" hidden></div>
     </header>
 
+    <section class="presets" id="presets" role="tablist" aria-label="Commute direction">
+      <button class="preset" type="button" data-preset="toWork" role="tab">🏢 To work</button>
+      <button class="preset" type="button" data-preset="toHome" role="tab">🏠 To home</button>
+    </section>
+
+    <section id="weather" class="wx" hidden aria-label="Weather"></section>
+
     <section class="controls">
-      <label class="field">
-        <span>From</span>
-        <input id="fromInput" type="text" value="Horgen" autocomplete="off" />
-      </label>
-      <button id="swapBtn" class="swap" type="button" aria-label="Swap direction" title="Swap direction (evening commute)">⇄</button>
-      <label class="field">
-        <span>To</span>
-        <input id="toInput" type="text" value="Zürich Enge" autocomplete="off" />
+      <label class="field field--walk">
+        <span id="walkOriginLabel">🚶 to station</span>
+        <input id="walkOriginInput" type="number" min="0" max="60" step="1" value="12" inputmode="numeric" />
       </label>
       <label class="field field--walk">
-        <span id="walkLabelText">🚶 Walk (min)</span>
-        <input id="walkInput" type="number" min="0" max="60" step="1" value="12" inputmode="numeric" />
+        <span id="walkDestLabel">🚶 from station</span>
+        <input id="walkDestInput" type="number" min="0" max="60" step="1" value="9" inputmode="numeric" />
       </label>
       <button id="refreshBtn" class="btn" type="button" aria-label="Refresh now">
         <span class="btn__spinner" aria-hidden="true"></span>
@@ -70,6 +72,6 @@
     </footer>
   </main>
 
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
