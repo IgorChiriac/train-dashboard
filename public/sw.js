@@ -1,5 +1,5 @@
 /* Service worker for the S2 Board PWA. */
-const CACHE = "s2board-v1";
+const CACHE = "s2board-v2";
 const SHELL = [
   "./",
   "index.html",
@@ -37,14 +37,10 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
 
-  if (NETWORK_FIRST_HOSTS.includes(url.hostname)) {
+  // Network-first for both live-data hosts and the same-origin app shell, so a
+  // new deploy is always picked up when online; cache is the offline fallback.
+  if (url.origin === self.location.origin || NETWORK_FIRST_HOSTS.includes(url.hostname)) {
     event.respondWith(networkFirst(request));
-    return;
-  }
-
-  // Same-origin app shell → cache-first, then network (and cache it).
-  if (url.origin === self.location.origin) {
-    event.respondWith(cacheFirst(request));
   }
 });
 
@@ -59,13 +55,4 @@ async function networkFirst(request) {
     if (cached) return cached;
     throw err;
   }
-}
-
-async function cacheFirst(request) {
-  const cache = await caches.open(CACHE);
-  const cached = await cache.match(request);
-  if (cached) return cached;
-  const res = await fetch(request);
-  if (res && res.ok) cache.put(request, res.clone());
-  return res;
 }

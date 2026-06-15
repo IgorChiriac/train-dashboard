@@ -397,7 +397,7 @@ els.refreshBtn.addEventListener("click", () => { loadDepartures(); loadWeather(t
 els.swapBtn.addEventListener("click", swapDirection);
 els.walkInput.addEventListener("input", () => { persist(); if (connections.length) render(); });
 [els.fromInput, els.toInput].forEach((input) =>
-  input.addEventListener("change", () => { applyOriginWalk(); loadWeather(true); })
+  input.addEventListener("change", () => { applyOriginWalk(); loadDepartures(); loadWeather(true); })
 );
 [els.fromInput, els.toInput].forEach((input) =>
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") loadDepartures(); })
