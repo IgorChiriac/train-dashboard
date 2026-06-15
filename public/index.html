@@ -8,6 +8,8 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <div id="refreshBar" class="refresh-bar" aria-hidden="true"></div>
+
   <main class="app">
     <header class="app__header">
       <div class="route" id="route">
@@ -16,6 +18,13 @@
         <span class="route__to" id="toLabel">Zürich Enge</span>
       </div>
       <p class="subtitle">Next 5 departures &middot; the quick <strong>S2</strong> is highlighted</p>
+      <div class="livebar">
+        <span id="liveDot" class="live live--ok">
+          <span class="live__dot"></span>
+          <span id="liveText" class="live__text">LIVE</span>
+        </span>
+        <span id="updated" class="updated">—</span>
+      </div>
     </header>
 
     <section class="controls">
@@ -27,7 +36,14 @@
         <span>To</span>
         <input id="toInput" type="text" value="Zürich Enge" autocomplete="off" />
       </label>
-      <button id="refreshBtn" class="btn" type="button">Refresh</button>
+      <label class="field field--walk">
+        <span>🚶 Walk (min)</span>
+        <input id="walkInput" type="number" min="0" max="60" step="1" value="12" inputmode="numeric" />
+      </label>
+      <button id="refreshBtn" class="btn" type="button" aria-label="Refresh now">
+        <span class="btn__spinner" aria-hidden="true"></span>
+        <span class="btn__label">Refresh</span>
+      </button>
     </section>
 
     <section id="board" class="board" aria-live="polite">
