@@ -19,7 +19,7 @@ const LIMIT = 5;
 const REFRESH_MS = 60_000;
 const TICK_MS = 1_000;
 const WX_MS = 10 * 60_000;
-const STORE_KEY = "commute-prefs-v2";
+const STORE_KEY = "commute-prefs-v3";
 
 // --- Predefined commute paths -------------------------------------------------
 // Each leg endpoint: { name, place, station, walk } where `walk` is the default
@@ -27,13 +27,13 @@ const STORE_KEY = "commute-prefs-v2";
 const PRESETS = {
   toWork: {
     label: "To work",
-    origin: { name: "Home", place: "Brunnenwiesliweg 8, Horgen", station: "Horgen", walk: 12 },
-    dest: { name: "Office", place: "Bleicherweg 21, 8002 Zürich", station: "Zürich Enge", walk: 9 },
+    origin: { name: "Home", place: "Brunnenwiesliweg 8, Horgen", station: "Horgen", walk: 5 },
+    dest: { name: "Office", place: "Bleicherweg 21, 8002 Zürich", station: "Zürich Enge", walk: 8 },
   },
   toHome: {
     label: "To home",
-    origin: { name: "Office", place: "Bleicherweg 21, 8002 Zürich", station: "Zürich Enge", walk: 9 },
-    dest: { name: "Home", place: "Brunnenwiesliweg 8, Horgen", station: "Horgen", walk: 12 },
+    origin: { name: "Office", place: "Bleicherweg 21, 8002 Zürich", station: "Zürich Enge", walk: 8 },
+    dest: { name: "Home", place: "Brunnenwiesliweg 8, Horgen", station: "Horgen", walk: 5 },
   },
 };
 
@@ -351,13 +351,16 @@ async function loadDepartures() {
 
 function render() {
   const now = Date.now();
+  const walkMs = path().origin.walk * 60000;
+  // Only trains you can still catch: leave-by time (departure − walk) must not
+  // have passed (small 30s grace so the one you should run for lingers briefly).
   const upcoming = connections
-    .filter((c) => departureDate(c).getTime() - now > -60_000)
+    .filter((c) => departureDate(c).getTime() - walkMs - now > -30_000)
     .sort((a, b) => departureDate(a) - departureDate(b))
     .slice(0, LIMIT);
 
   if (upcoming.length === 0) {
-    els.board.innerHTML = `<div class="empty">No upcoming departures found.</div>`;
+    els.board.innerHTML = `<div class="empty">No trains you can still catch — check back soon.</div>`;
     return;
   }
   els.board.innerHTML = upcoming.map((conn) => cardHtml(conn, now)).join("");
