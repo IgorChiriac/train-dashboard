@@ -26,13 +26,23 @@ const STORE_KEY = "commute-prefs-v3";
 // minutes between the address and that path's *boarding/alighting* station.
 const PRESETS = {
   toWork: {
-    label: "To work",
+    label: "To work", pill: "🏢 To work",
     origin: { name: "Home", place: "Brunnenwiesliweg 8, Horgen", station: "Horgen", walk: 5 },
     dest: { name: "Office", place: "Bleicherweg 21, 8002 Zürich", station: "Zürich Enge", walk: 8 },
   },
   toHome: {
-    label: "To home",
+    label: "To home", pill: "🏠 To home",
     origin: { name: "Office", place: "Bleicherweg 21, 8002 Zürich", station: "Zürich Enge", walk: 8 },
+    dest: { name: "Home", place: "Brunnenwiesliweg 8, Horgen", station: "Horgen", walk: 5 },
+  },
+  fromEnge: {
+    label: "Enge → home", pill: "🚉 Enge → home",
+    origin: { name: "Zürich Enge", place: "Zürich Enge station", station: "Zürich Enge", walk: 2 },
+    dest: { name: "Home", place: "Brunnenwiesliweg 8, Horgen", station: "Horgen", walk: 5 },
+  },
+  fromHB: {
+    label: "HB → home", pill: "🚉 HB → home",
+    origin: { name: "Zürich HB", place: "Zürich HB station", station: "Zürich HB", walk: 3 },
     dest: { name: "Home", place: "Brunnenwiesliweg 8, Horgen", station: "Horgen", walk: 5 },
   },
 };
@@ -41,6 +51,7 @@ const PRESETS = {
 const KNOWN_COORDS = {
   "Horgen": { lat: 47.2597, lon: 8.5958, label: "Horgen" },
   "Zürich Enge": { lat: 47.3642, lon: 8.5315, label: "Zürich Enge" },
+  "Zürich HB": { lat: 47.3779, lon: 8.5403, label: "Zürich HB" },
 };
 
 const els = {
@@ -121,8 +132,12 @@ function applyPreset(id) {
   // walk inputs + labels
   els.walkOriginInput.value = p.origin.walk;
   els.walkDestInput.value = p.dest.walk;
-  els.walkOriginLabel.textContent = `🚶 ${p.origin.name} → ${p.origin.station}`;
-  els.walkDestLabel.textContent = `🚶 ${p.dest.station} → ${p.dest.name}`;
+  els.walkOriginLabel.textContent = p.origin.name === p.origin.station
+    ? `🚶 to ${p.origin.station} platform`
+    : `🚶 ${p.origin.name} → ${p.origin.station}`;
+  els.walkDestLabel.textContent = p.dest.name === p.dest.station
+    ? `🚶 from ${p.dest.station} platform`
+    : `🚶 ${p.dest.station} → ${p.dest.name}`;
 
   // header
   els.fromLabel.textContent = p.origin.name;
@@ -455,9 +470,17 @@ els.presets.addEventListener("click", (e) => {
 
 /* ---------- init ---------- */
 
+function buildPresetButtons() {
+  els.presets.innerHTML = Object.entries(PRESETS)
+    .map(([id, p]) =>
+      `<button class="preset" type="button" data-preset="${id}" role="tab">${p.pill}</button>`)
+    .join("");
+}
+
 function init() {
   loadPrefs();
-  applyPreset(defaultPresetId()); // morning → work, afternoon → home
+  buildPresetButtons();
+  applyPreset(defaultPresetId()); // before noon → work, noon onward → home
   startTimers();
 
   if ("serviceWorker" in navigator) {
