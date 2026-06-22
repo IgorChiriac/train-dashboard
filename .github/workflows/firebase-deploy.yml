@@ -1,0 +1,24 @@
+name: Deploy to Firebase Hosting (production)
+
+# Runs when a pull request is merged into main (a merge is a push to main),
+# deploying the live site. Requires the FIREBASE_SERVICE_ACCOUNT repo secret
+# (a Firebase service-account JSON key with the Firebase Hosting Admin role).
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy_live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Firebase Hosting (live channel)
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          channelId: live
+          projectId: train-dashboard-6486d

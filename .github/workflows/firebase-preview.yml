@@ -1,0 +1,26 @@
+name: Preview deploy (pull request)
+
+# On every PR, deploy to a temporary Firebase Hosting preview channel and post
+# the preview URL as a comment, so changes can be reviewed live before merging.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  preview:
+    # Skip PRs from forks — they can't access the service-account secret.
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to a preview channel
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: train-dashboard-6486d
+          expires: 7d
