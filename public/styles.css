@@ -119,10 +119,34 @@ body {
   box-shadow: var(--shadow);
 }
 
+.card {
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.08s ease, opacity 0.15s ease;
+}
+.card:hover { border-color: var(--accent); }
+.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card:active { transform: scale(0.995); }
+
 .card--s2 {
   background: linear-gradient(135deg, var(--card-hi), var(--card));
   border-color: var(--accent-soft);
   box-shadow: 0 10px 30px rgba(61, 220, 132, 0.18);
+}
+
+/* Past walking time — you'd have to run, but it's still shown, not hidden. */
+.card--run {
+  border-color: var(--accent);
+  border-style: dashed;
+}
+/* Just departed — kept briefly so you can see what was available, dimmed. */
+.card--gone {
+  opacity: 0.5;
+  filter: saturate(0.6);
+}
+/* The train you've decided on. */
+.card--selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow);
 }
 
 .line {
@@ -195,6 +219,38 @@ body {
 }
 .countdown--now .countdown__min { color: var(--danger); }
 .countdown--boarding .countdown__min { color: var(--accent); }
+.countdown--run .countdown__min { color: var(--accent); }
+
+/* ---------- selected train: live catch timer ---------- */
+
+.catch-timer {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--bg-soft);
+  border: 1px solid var(--accent);
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.catch-timer__clock {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+.catch-timer__label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.catch-timer--run { border-color: var(--accent); }
+.catch-timer--run .catch-timer__clock { color: var(--accent); }
+.catch-timer--gone { border-color: var(--line); }
+.catch-timer--gone .catch-timer__clock { color: var(--muted); }
 
 .delay {
   color: var(--danger);
@@ -402,6 +458,7 @@ body {
 }
 .chip--late { color: #2a0d0d; background: var(--danger); }
 .chip--ontime { color: var(--accent-soft); background: rgba(61, 220, 132, 0.14); }
+.chip--run { color: #1a1300; background: var(--accent); }
 
 .details__meta strong { color: var(--text); }
 .details__meta .dot { margin: 0 7px; opacity: 0.5; }
