@@ -10,6 +10,8 @@ and highlights the **quick S2** so you can spot it at a glance.
 
 - ⚡ **S2 highlighting** — the fast S2 connections get a green card and a "Quick S2" badge.
 - ⏱ **Live countdowns** — each departure shows minutes-to-go, ticking every second, with a "go!" warning at ≤ 2 min and "now" when departing.
+- 🎯 **Pick a train** — tap any departure to focus it and watch a live `mm:ss` timer of the time left to catch it.
+- 🏃 **Run-for-it / history** — trains past your leave-by time are no longer hidden; they stay on the board flagged "past walk time" (with a "run!" countdown) so you can still sprint for them or see what was available.
 - 🚉 Departure & arrival times, platform, trip duration, transfers, and real-time delays.
 - 🔄 Auto-refreshes every 60s and whenever you return to the tab.
 - ✏️ Editable **From / To** fields if you ever start from a different station.
