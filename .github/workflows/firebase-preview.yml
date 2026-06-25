@@ -19,6 +19,10 @@ jobs:
       - uses: actions/checkout@v5
       - name: Deploy to a preview channel
         uses: FirebaseExtended/action-hosting-deploy@v0.10.0
+        env:
+          # Disable HTTP keep-alive to dodge the "Premature close" auth bug
+          # (see .github/scripts/disable-keepalive.js).
+          NODE_OPTIONS: "--require ${{ github.workspace }}/.github/scripts/disable-keepalive.js"
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
