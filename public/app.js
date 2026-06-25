@@ -83,6 +83,10 @@ let prefs = { walks: {}, coords: {} };
 // The train you've "decided on": a stable key (planned departure + line) so the
 // selection survives refreshes and live re-renders. null = nothing picked.
 let selectedKey = null;
+// "I'm walking": you've left the door, so stop the dramatic leave-by countdown
+// and calmly count down to the train leaving instead. Only meaningful for the
+// selected train; reset whenever the selection changes.
+let walking = false;
 
 /* ---------- preferences ---------- */
 
@@ -131,6 +135,7 @@ function defaultPresetId() {
 function applyPreset(id) {
   activeId = id;
   selectedKey = null; // a picked train belongs to one direction
+  walking = false;
   const p = path();
 
   // walk inputs + labels
@@ -400,6 +405,7 @@ function render() {
   // Drop a stale selection (its train already rolled off the board).
   if (selectedKey && !upcoming.some((c) => connKey(c) === selectedKey)) {
     selectedKey = null;
+    walking = false;
   }
 
   els.board.innerHTML = upcoming.map((conn) => cardHtml(conn, now)).join("");
@@ -413,6 +419,7 @@ function cardHtml(conn, now) {
   const delay = delayMinutes(conn);
   const key = connKey(conn);
   const selected = key === selectedKey;
+  const isWalking = selected && walking; // you've left → count to the train, calmly
 
   const msToDep = dep.getTime() - now;
   const minsToDep = Math.round(msToDep / 60000);
@@ -429,20 +436,29 @@ function cardHtml(conn, now) {
   const duration = formatDuration(conn.duration);
   const transfers = conn.transfers || 0;
 
-  // Big countdown = minutes until you must leave the origin door.
+  // Big countdown. Default = minutes until you must leave the origin door.
+  // Once you're walking, switch to a calm count toward the train leaving and
+  // drop the go!/run!/gone drama — you're already on your way.
   let cdClass = "countdown";
-  let bigText = `${minsToLeave}`;
-  let bigLabel = "min to leave";
-  if (departed) {
-    cdClass += " countdown--now"; bigText = "gone"; bigLabel = "departed";
-  } else if (pastWalk) {
-    cdClass += " countdown--run"; bigText = "run!";
-    bigLabel = `${minsToDep} min to catch`;
-  } else if (minsToLeave <= 0) {
-    cdClass += " countdown--now"; bigText = "go!"; bigLabel = "leave now";
-  } else if (minsToLeave <= 2) {
-    cdClass += " countdown--boarding";
-    bigLabel = "min — head out!";
+  let bigText, bigLabel;
+  if (isWalking) {
+    cdClass += " countdown--walking";
+    if (departed) { bigText = "now"; bigLabel = "train leaving"; }
+    else { bigText = `${minsToDep}`; bigLabel = "min till it leaves"; }
+  } else {
+    bigText = `${minsToLeave}`;
+    bigLabel = "min to leave";
+    if (departed) {
+      cdClass += " countdown--now"; bigText = "gone"; bigLabel = "departed";
+    } else if (pastWalk) {
+      cdClass += " countdown--run"; bigText = "run!";
+      bigLabel = `${minsToDep} min to catch`;
+    } else if (minsToLeave <= 0) {
+      cdClass += " countdown--now"; bigText = "go!"; bigLabel = "leave now";
+    } else if (minsToLeave <= 2) {
+      cdClass += " countdown--boarding";
+      bigLabel = "min — head out!";
+    }
   }
 
   let statusChip = "";
@@ -458,15 +474,36 @@ function cardHtml(conn, now) {
     transfers > 0 ? `${transfers} transfer${transfers > 1 ? "s" : ""}` : "direct",
   ].filter(Boolean).join(`<span class="dot">·</span>`);
 
-  // When you pick a train, show a live ticking timer of the time left to catch
-  // it (= time until it actually departs, mm:ss), so you know whether to run.
+  // When you pick a train, show a live ticking timer (mm:ss to departure) plus
+  // an "I'm walking" toggle. While walking we show the destination *arrival*
+  // time (when you actually get there) rather than the departure.
   let catchTimer = "";
   if (selected) {
-    const label = departed ? "departed" : pastWalk ? "🏃 run to catch it" : "time to catch";
+    let cls, clock, label, sub = "";
+    if (isWalking) {
+      cls = "catch-timer--walking";
+      clock = departed ? "now" : formatCountdown(msToDep);
+      label = departed ? "🚶 board now!" : "🚶 walking · until it leaves";
+      sub = arrivalDate
+        ? `🏁 arrive ${p.dest.name} <strong>${formatClock(arrivalDate)}</strong>`
+        : "";
+    } else {
+      cls = departed ? "catch-timer--gone" : pastWalk ? "catch-timer--run" : "";
+      clock = departed ? "—" : formatCountdown(msToDep);
+      label = departed ? "departed" : pastWalk ? "🏃 run to catch it" : "time to catch";
+    }
+    const walkBtn = `<button type="button" class="walk-toggle ${isWalking ? "walk-toggle--on" : ""}"
+        data-action="walk" aria-pressed="${isWalking}">${isWalking ? "I’m walking ✓" : "🚶 I’m walking"}</button>`;
     catchTimer = `
-      <div class="catch-timer ${departed ? "catch-timer--gone" : pastWalk ? "catch-timer--run" : ""}">
-        <span class="catch-timer__clock">${departed ? "—" : formatCountdown(msToDep)}</span>
-        <span class="catch-timer__label">${label}</span>
+      <div class="catch-timer ${cls}">
+        <div class="catch-timer__info">
+          <div class="catch-timer__row">
+            <span class="catch-timer__clock">${clock}</span>
+            <span class="catch-timer__label">${label}</span>
+          </div>
+          ${sub ? `<div class="catch-timer__sub">${sub}</div>` : ""}
+        </div>
+        ${walkBtn}
       </div>`;
   }
 
@@ -474,8 +511,9 @@ function cardHtml(conn, now) {
     "card",
     quick ? "card--s2" : "",
     selected ? "card--selected" : "",
-    pastWalk ? "card--run" : "",
-    departed ? "card--gone" : "",
+    isWalking ? "card--walking" : "",
+    (pastWalk && !isWalking) ? "card--run" : "",
+    (departed && !isWalking) ? "card--gone" : "",
   ].filter(Boolean).join(" ");
 
   return `
@@ -488,7 +526,8 @@ function cardHtml(conn, now) {
           <span class="dep-time">${formatClock(dep)}</span>
           ${statusChip}
           ${quick ? `<span class="badge-quick">⚡ Quick S2</span>` : ""}
-          ${pastWalk ? `<span class="chip chip--run">past walk time</span>` : ""}
+          ${isWalking ? `<span class="chip chip--walking">🚶 walking</span>` : ""}
+          ${(pastWalk && !isWalking) ? `<span class="chip chip--run">past walk time</span>` : ""}
         </div>
         <div class="details__meta">${meta}</div>
       </div>
@@ -526,18 +565,25 @@ els.presets.addEventListener("click", (e) => {
   input.addEventListener("input", () => { persist(); if (connections.length) render(); })
 );
 
-// Pick / un-pick a train to focus its catch timer.
+// Pick / un-pick a train to focus its catch timer. Changing the pick clears
+// any "walking" state — it belongs to the train you were heading for.
 function toggleSelect(card) {
   const key = decodeURIComponent(card.dataset.key);
   selectedKey = selectedKey === key ? null : key;
+  walking = false;
   render();
 }
 els.board.addEventListener("click", (e) => {
+  // The "I'm walking" toggle lives inside the card; handle it without also
+  // toggling the card's selection.
+  const walkBtn = e.target.closest("[data-action='walk']");
+  if (walkBtn) { e.stopPropagation(); walking = !walking; render(); return; }
   const card = e.target.closest(".card");
   if (card) toggleSelect(card);
 });
 els.board.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" && e.key !== " ") return;
+  if (e.target.closest("[data-action='walk']")) return; // the button handles itself
   const card = e.target.closest(".card");
   if (card) { e.preventDefault(); toggleSelect(card); }
 });

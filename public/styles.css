@@ -148,6 +148,11 @@ body {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent), var(--shadow);
 }
+/* You've left and are walking — calm green, no leave-by drama. */
+.card--walking {
+  border-color: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft), var(--shadow);
+}
 
 .line {
   display: inline-flex;
@@ -220,6 +225,7 @@ body {
 .countdown--now .countdown__min { color: var(--danger); }
 .countdown--boarding .countdown__min { color: var(--accent); }
 .countdown--run .countdown__min { color: var(--accent); }
+.countdown--walking .countdown__min { color: var(--accent-soft); }
 
 /* ---------- selected train: live catch timer ---------- */
 
@@ -231,9 +237,13 @@ body {
   background: var(--bg-soft);
   border: 1px solid var(--accent);
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
+.catch-timer__info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.catch-timer__row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .catch-timer__clock {
   font-size: 2rem;
   font-weight: 800;
@@ -247,10 +257,29 @@ body {
   letter-spacing: 0.08em;
   color: var(--muted);
 }
+.catch-timer__sub { font-size: 0.85rem; color: var(--text); }
+.catch-timer__sub strong { color: var(--accent-soft); }
 .catch-timer--run { border-color: var(--accent); }
 .catch-timer--run .catch-timer__clock { color: var(--accent); }
 .catch-timer--gone { border-color: var(--line); }
 .catch-timer--gone .catch-timer__clock { color: var(--muted); }
+.catch-timer--walking { border-color: var(--accent-soft); }
+.catch-timer--walking .catch-timer__clock { color: var(--accent-soft); }
+
+/* "I'm walking" toggle */
+.walk-toggle {
+  border: 1px solid var(--accent-soft);
+  background: transparent;
+  color: var(--accent-soft);
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.walk-toggle:hover { background: rgba(61, 220, 132, 0.12); }
+.walk-toggle--on { background: var(--accent-soft); border-color: var(--accent-soft); color: #06210f; }
 
 .delay {
   color: var(--danger);
@@ -459,6 +488,7 @@ body {
 .chip--late { color: #2a0d0d; background: var(--danger); }
 .chip--ontime { color: var(--accent-soft); background: rgba(61, 220, 132, 0.14); }
 .chip--run { color: #1a1300; background: var(--accent); }
+.chip--walking { color: #06210f; background: var(--accent-soft); }
 
 .details__meta strong { color: var(--text); }
 .details__meta .dot { margin: 0 7px; opacity: 0.5; }
