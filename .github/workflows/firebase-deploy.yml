@@ -22,3 +22,7 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           channelId: live
           projectId: train-dashboard-6486d
+          # Pin past the node-fetch keep-alive "Premature close" auth bug on
+          # Node 22/24 (firebase-tools#10692, fixed in 15.22.2). The action
+          # otherwise pulls firebase-tools@latest, which regressed.
+          firebaseToolsVersion: "15.22.2"
