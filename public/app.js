@@ -80,6 +80,9 @@ let lastFetchOk = false;
 let lastWeatherAt = 0;
 let activeId = "toWork";
 let prefs = { walks: {}, coords: {} };
+// The train you've "decided on": a stable key (planned departure + line) so the
+// selection survives refreshes and live re-renders. null = nothing picked.
+let selectedKey = null;
 
 /* ---------- preferences ---------- */
 
@@ -127,6 +130,7 @@ function defaultPresetId() {
 
 function applyPreset(id) {
   activeId = id;
+  selectedKey = null; // a picked train belongs to one direction
   const p = path();
 
   // walk inputs + labels
@@ -178,6 +182,12 @@ function departureDate(conn) {
   return new Date(prog || planned);
 }
 
+// Stable identity for a connection: the *planned* departure + line. Survives
+// refreshes (planned time doesn't drift) so a selected train stays selected.
+function connKey(conn) {
+  return `${conn.from && conn.from.departure}|${lineOf(conn)}`;
+}
+
 function delayMinutes(conn) {
   if (conn.from && typeof conn.from.delay === "number") return conn.from.delay;
   const prog = conn.from && conn.from.prognosis && conn.from.prognosis.departure;
@@ -199,6 +209,13 @@ function formatDuration(iso) {
   const total = Number(d) * 1440 + Number(hh) * 60 + Number(mm);
   if (total < 60) return `${total} min`;
   return `${Math.floor(total / 60)}h ${total % 60}min`;
+}
+
+function formatCountdown(ms) {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function formatClock(date) {
@@ -366,18 +383,25 @@ async function loadDepartures() {
 
 function render() {
   const now = Date.now();
-  const walkMs = path().origin.walk * 60000;
-  // Only trains you can still catch: leave-by time (departure − walk) must not
-  // have passed (small 30s grace so the one you should run for lingers briefly).
+  // Keep showing trains until the train itself departs — we no longer hide the
+  // ones whose leave-by time has passed. If you run (or just want to know what
+  // was available), they stay on the board. A 60s grace keeps a just-departed
+  // train around briefly so you can see you missed it.
   const upcoming = connections
-    .filter((c) => departureDate(c).getTime() - walkMs - now > -30_000)
+    .filter((c) => departureDate(c).getTime() - now > -60_000)
     .sort((a, b) => departureDate(a) - departureDate(b))
     .slice(0, LIMIT);
 
   if (upcoming.length === 0) {
-    els.board.innerHTML = `<div class="empty">No trains you can still catch — check back soon.</div>`;
+    els.board.innerHTML = `<div class="empty">No upcoming trains right now — check back soon.</div>`;
     return;
   }
+
+  // Drop a stale selection (its train already rolled off the board).
+  if (selectedKey && !upcoming.some((c) => connKey(c) === selectedKey)) {
+    selectedKey = null;
+  }
+
   els.board.innerHTML = upcoming.map((conn) => cardHtml(conn, now)).join("");
 }
 
@@ -387,10 +411,17 @@ function cardHtml(conn, now) {
   const line = lineOf(conn);
   const quick = isQuick(conn);
   const delay = delayMinutes(conn);
+  const key = connKey(conn);
+  const selected = key === selectedKey;
 
-  const minsToDep = Math.round((dep.getTime() - now) / 60000);
+  const msToDep = dep.getTime() - now;
+  const minsToDep = Math.round(msToDep / 60000);
   const leaveBy = new Date(dep.getTime() - p.origin.walk * 60000);
   const minsToLeave = Math.round((leaveBy.getTime() - now) / 60000);
+
+  // Catchability: comfortable → head out → go → run (past walk time) → gone.
+  const departed = minsToDep <= 0;
+  const pastWalk = !departed && minsToLeave < 0; // missed the leisurely leave-by → you'd have to run
 
   const platform = conn.from.platform ? `Pl. ${conn.from.platform}` : "";
   const arrivalDate = conn.to && conn.to.arrival ? new Date(conn.to.arrival) : null;
@@ -399,14 +430,17 @@ function cardHtml(conn, now) {
   const transfers = conn.transfers || 0;
 
   // Big countdown = minutes until you must leave the origin door.
-  const primaryMins = minsToLeave;
   let cdClass = "countdown";
-  let bigText = `${primaryMins}`;
+  let bigText = `${minsToLeave}`;
   let bigLabel = "min to leave";
-  if (primaryMins <= 0) {
-    if (minsToDep <= 0) { cdClass += " countdown--now"; bigText = "gone"; bigLabel = "departed"; }
-    else { cdClass += " countdown--now"; bigText = "go!"; bigLabel = "leave now"; }
-  } else if (primaryMins <= 2) {
+  if (departed) {
+    cdClass += " countdown--now"; bigText = "gone"; bigLabel = "departed";
+  } else if (pastWalk) {
+    cdClass += " countdown--run"; bigText = "run!";
+    bigLabel = `${minsToDep} min to catch`;
+  } else if (minsToLeave <= 0) {
+    cdClass += " countdown--now"; bigText = "go!"; bigLabel = "leave now";
+  } else if (minsToLeave <= 2) {
     cdClass += " countdown--boarding";
     bigLabel = "min — head out!";
   }
@@ -424,14 +458,37 @@ function cardHtml(conn, now) {
     transfers > 0 ? `${transfers} transfer${transfers > 1 ? "s" : ""}` : "direct",
   ].filter(Boolean).join(`<span class="dot">·</span>`);
 
+  // When you pick a train, show a live ticking timer of the time left to catch
+  // it (= time until it actually departs, mm:ss), so you know whether to run.
+  let catchTimer = "";
+  if (selected) {
+    const label = departed ? "departed" : pastWalk ? "🏃 run to catch it" : "time to catch";
+    catchTimer = `
+      <div class="catch-timer ${departed ? "catch-timer--gone" : pastWalk ? "catch-timer--run" : ""}">
+        <span class="catch-timer__clock">${departed ? "—" : formatCountdown(msToDep)}</span>
+        <span class="catch-timer__label">${label}</span>
+      </div>`;
+  }
+
+  const cardClasses = [
+    "card",
+    quick ? "card--s2" : "",
+    selected ? "card--selected" : "",
+    pastWalk ? "card--run" : "",
+    departed ? "card--gone" : "",
+  ].filter(Boolean).join(" ");
+
   return `
-    <article class="card ${quick ? "card--s2" : ""}">
+    <article class="${cardClasses}" data-key="${encodeURIComponent(key)}"
+             role="button" tabindex="0" aria-pressed="${selected}"
+             aria-label="Select ${line} departing ${formatClock(dep)}">
       <div class="line">${line}</div>
       <div class="details">
         <div class="details__top">
           <span class="dep-time">${formatClock(dep)}</span>
           ${statusChip}
           ${quick ? `<span class="badge-quick">⚡ Quick S2</span>` : ""}
+          ${pastWalk ? `<span class="chip chip--run">past walk time</span>` : ""}
         </div>
         <div class="details__meta">${meta}</div>
       </div>
@@ -439,6 +496,7 @@ function cardHtml(conn, now) {
         <span class="countdown__min">${bigText}</span>
         <span class="countdown__label">${bigLabel}</span>
       </div>
+      ${catchTimer}
     </article>`;
 }
 
@@ -467,6 +525,22 @@ els.presets.addEventListener("click", (e) => {
 [els.walkOriginInput, els.walkDestInput].forEach((input) =>
   input.addEventListener("input", () => { persist(); if (connections.length) render(); })
 );
+
+// Pick / un-pick a train to focus its catch timer.
+function toggleSelect(card) {
+  const key = decodeURIComponent(card.dataset.key);
+  selectedKey = selectedKey === key ? null : key;
+  render();
+}
+els.board.addEventListener("click", (e) => {
+  const card = e.target.closest(".card");
+  if (card) toggleSelect(card);
+});
+els.board.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const card = e.target.closest(".card");
+  if (card) { e.preventDefault(); toggleSelect(card); }
+});
 
 /* ---------- init ---------- */
 
