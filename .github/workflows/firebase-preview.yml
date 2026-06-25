@@ -24,6 +24,8 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           projectId: train-dashboard-6486d
           expires: 7d
-          # Pin past the node-fetch keep-alive "Premature close" auth bug on
-          # Node 22/24 (firebase-tools#10692, fixed in 15.22.2).
-          firebaseToolsVersion: "15.22.2"
+          # Pin to the last version whose bundled google-auth-library/gaxios
+          # authenticates a service account on Node 24 (15.22.1/15.22.2
+          # regressed it with a keep-alive "Premature close"; cf.
+          # firebase-tools#10692). 15.22.0 deployed cleanly here on 2026-06-22.
+          firebaseToolsVersion: "15.22.0"
