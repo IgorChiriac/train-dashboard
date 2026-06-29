@@ -475,8 +475,10 @@ function cardHtml(conn, now) {
   ].filter(Boolean).join(`<span class="dot">·</span>`);
 
   // When you pick a train, show a live ticking timer (mm:ss to departure) plus
-  // an "I'm walking" toggle. While walking we show the destination *arrival*
-  // time (when you actually get there) rather than the departure.
+  // an "I'm walking" toggle. While walking we show the time the train is at
+  // *your* (departing) station — the platform you're walking toward — so you
+  // know when to be there. (The boarding stop only exposes a departure time,
+  // which is when the train is at your platform.)
   let catchTimer = "";
   if (selected) {
     let cls, clock, label, sub = "";
@@ -484,9 +486,7 @@ function cardHtml(conn, now) {
       cls = "catch-timer--walking";
       clock = departed ? "now" : formatCountdown(msToDep);
       label = departed ? "🚶 board now!" : "🚶 walking · until it leaves";
-      sub = arrivalDate
-        ? `🏁 arrive ${p.dest.name} <strong>${formatClock(arrivalDate)}</strong>`
-        : "";
+      sub = `🚉 arrive ${p.origin.station} <strong>${formatClock(dep)}</strong>`;
     } else {
       cls = departed ? "catch-timer--gone" : pastWalk ? "catch-timer--run" : "";
       clock = departed ? "—" : formatCountdown(msToDep);
