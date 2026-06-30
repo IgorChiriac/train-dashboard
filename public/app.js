@@ -16,6 +16,12 @@ const GEO_API = "https://geocoding-api.open-meteo.com/v1/search";
 const WX_API = "https://api.open-meteo.com/v1/forecast";
 const QUICK_LINE = "S2";
 const LIMIT = 5;
+// How long a train lingers on the board after it has (really) left — handy when
+// the one you wanted was late and you almost made it. We also start the
+// timetable query this far in the past so late/just-departed trains are still
+// returned by the API (it otherwise drops trains by their *scheduled* time).
+const PAST_GRACE_MS = 5 * 60_000;
+const MAX_PAST = 3; // cap how many already-departed trains we show at once
 const REFRESH_MS = 60_000;
 const TICK_MS = 1_000;
 const WX_MS = 10 * 60_000;
@@ -165,10 +171,16 @@ function applyPreset(id) {
 /* ---------- API helpers ---------- */
 
 function buildUrl(from, to) {
-  // direct=1 → only connections without a transfer. Request a few extra so the
-  // client-side guard still leaves enough to show.
+  // direct=1 → only connections without a transfer. Start the search a few
+  // minutes in the past so a late or just-departed train (which the API would
+  // otherwise drop by its scheduled time) is still returned; ask for extra so
+  // the client-side window still leaves enough upcoming ones to show.
+  const start = new Date(Date.now() - PAST_GRACE_MS);
+  const pad = (n) => String(n).padStart(2, "0");
+  const date = `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`;
+  const time = `${pad(start.getHours())}:${pad(start.getMinutes())}`;
   const params = new URLSearchParams({
-    from, to, direct: "1", limit: String(LIMIT + 3),
+    from, to, direct: "1", date, time, limit: String(LIMIT + MAX_PAST + 2),
   });
   return `${API}?${params.toString()}`;
 }
@@ -388,14 +400,17 @@ async function loadDepartures() {
 
 function render() {
   const now = Date.now();
-  // Keep showing trains until the train itself departs — we no longer hide the
-  // ones whose leave-by time has passed. If you run (or just want to know what
-  // was available), they stay on the board. A 60s grace keeps a just-departed
-  // train around briefly so you can see you missed it.
-  const upcoming = connections
-    .filter((c) => departureDate(c).getTime() - now > -60_000)
-    .sort((a, b) => departureDate(a) - departureDate(b))
-    .slice(0, LIMIT);
+  // Keep showing trains until well past departure — we don't hide the ones whose
+  // leave-by time has passed (run for it / see what was available), and we keep
+  // already-departed trains for PAST_GRACE_MS so a late one you nearly caught
+  // lingers. Show every recent-past train (capped) PLUS the next LIMIT upcoming,
+  // so the history never pushes future trains off the board.
+  const sorted = connections
+    .filter((c) => departureDate(c).getTime() - now > -PAST_GRACE_MS)
+    .sort((a, b) => departureDate(a) - departureDate(b));
+  const past = sorted.filter((c) => departureDate(c).getTime() <= now).slice(-MAX_PAST);
+  const future = sorted.filter((c) => departureDate(c).getTime() > now).slice(0, LIMIT);
+  const upcoming = [...past, ...future];
 
   if (upcoming.length === 0) {
     els.board.innerHTML = `<div class="empty">No upcoming trains right now — check back soon.</div>`;
@@ -449,7 +464,9 @@ function cardHtml(conn, now) {
     bigText = `${minsToLeave}`;
     bigLabel = "min to leave";
     if (departed) {
-      cdClass += " countdown--now"; bigText = "gone"; bigLabel = "departed";
+      cdClass += " countdown--now"; bigText = "gone";
+      const agoMin = Math.round(-msToDep / 60000);
+      bigLabel = agoMin >= 1 ? `left ${agoMin} min ago` : "just left";
     } else if (pastWalk) {
       cdClass += " countdown--run"; bigText = "run!";
       bigLabel = `${minsToDep} min to catch`;
