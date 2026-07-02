@@ -15,6 +15,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Inject train-radar API keys into trains.js
+        env:
+          GEOPS_KEY: ${{ secrets.GEOPS_KEY }}
+          TEDP_TOKEN: ${{ secrets.TEDP_TOKEN }}
+        run: node .github/scripts/inject-keys.js
       - name: Deploy to Firebase Hosting (live channel)
         uses: FirebaseExtended/action-hosting-deploy@v0.10.0
         env:
