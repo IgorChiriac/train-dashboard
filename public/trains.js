@@ -29,7 +29,9 @@ if (QS.get("otdkey")) localStorage.setItem("radar-otd-key", QS.get("otdkey"));
 const GEOPS_KEY = localStorage.getItem("radar-geops-key") || GEOPS_KEY_CONST;
 const OTD_KEY = localStorage.getItem("radar-otd-key") || OTD_KEY_CONST;
 
-const WS_URL = (key) => `wss://api.geops.io/tracker-ws/v1/ws?key=${encodeURIComponent(key)}`;
+// NB: the endpoint is /tracker-ws/v1/ (trailing slash, no extra path segment),
+// matching geOps' own mobility-toolbox-js client.
+const WS_URL = (key) => `wss://api.geops.io/tracker-ws/v1/?key=${encodeURIComponent(key)}`;
 const FORMATION_API = "https://api.opentransportdata.swiss/formation/v2/formations_stop_based";
 
 const STYLE_URLS = [
