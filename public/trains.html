@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>🚆 Live train radar · Switzerland</title>
+  <meta name="description" content="Flightradar-style live map of every train moving in Switzerland right now." />
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0b1020" />
+  <link rel="icon" href="train-icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="train-icon.svg" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Train Radar" />
+
+  <link rel="preconnect" href="https://tiles.openfreemap.org" />
+  <link rel="preconnect" href="https://api.geops.io" />
+  <link rel="stylesheet" href="vendor/maplibre-gl.css" />
+  <link rel="stylesheet" href="trains.css?v=1" />
+</head>
+<body>
+  <div id="map" aria-label="Map of Switzerland"></div>
+  <canvas id="radar" aria-hidden="true"></canvas>
+
+  <header class="radar-top">
+    <a class="radar-back" href="index.html" aria-label="Back to departure board">←</a>
+    <h1 class="radar-title">Live train radar</h1>
+    <span id="liveDot" class="live live--loading">
+      <span class="live__dot"></span>
+      <span id="liveText" class="live__text">CONNECTING</span>
+    </span>
+    <span id="trainCount" class="radar-count" hidden></span>
+  </header>
+
+  <div id="toast" class="radar-toast" role="status" hidden></div>
+
+  <!-- Train info bottom sheet -->
+  <aside id="panel" class="sheet" hidden aria-label="Train details">
+    <div class="sheet__grab" aria-hidden="true"></div>
+    <button id="panelClose" class="sheet__close" type="button" aria-label="Close">×</button>
+    <div id="panelBody" class="sheet__body"></div>
+  </aside>
+
+  <!-- API key setup sheet -->
+  <aside id="keySheet" class="sheet sheet--keys" hidden aria-label="API key setup">
+    <div class="sheet__grab" aria-hidden="true"></div>
+    <div class="sheet__body">
+      <h2 class="keys__title">🔑 One-time setup</h2>
+      <p id="keyIntro" class="keys__text">
+        Live train positions come from the <strong>geOps realtime API</strong> (the feed behind the
+        official SBB train map). Grab a free key at
+        <a href="https://developer.geops.io" target="_blank" rel="noopener">developer.geops.io</a>
+        and paste it below — it's stored only on this device.
+      </p>
+      <label class="keys__field">
+        <span>geOps API key (required)</span>
+        <input id="geopsKeyInput" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. 5cc87b12d7c537…" />
+      </label>
+      <label class="keys__field">
+        <span>opentransportdata.swiss key (optional — wagon info)</span>
+        <input id="otdKeyInput" type="text" autocomplete="off" spellcheck="false" placeholder="from api-manager.opentransportdata.swiss" />
+      </label>
+      <button id="keySave" class="keys__save" type="button">Start the radar</button>
+    </div>
+  </aside>
+
+  <script src="vendor/maplibre-gl.js"></script>
+  <script src="trains.js?v=1"></script>
+</body>
+</html>

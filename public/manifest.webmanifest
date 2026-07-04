@@ -8,6 +8,13 @@
   "orientation": "portrait",
   "background_color": "#0b1020",
   "theme_color": "#0b1020",
+  "shortcuts": [
+    {
+      "name": "Live train radar",
+      "url": "trains.html",
+      "icons": [{ "src": "train-icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    }
+  ],
   "icons": [
     {
       "src": "icon.svg",

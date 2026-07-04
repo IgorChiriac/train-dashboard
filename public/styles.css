@@ -379,6 +379,21 @@ body {
 
 .updated { color: var(--muted); }
 
+.maplink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--text);
+  font-weight: 700;
+  text-decoration: none;
+}
+.maplink img { width: 15px; height: 15px; }
+.maplink:hover { border-color: var(--accent); }
+
 /* spinner inside the refresh button */
 .btn { display: inline-flex; align-items: center; gap: 8px; }
 .btn__spinner {
