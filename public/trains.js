@@ -29,7 +29,9 @@ if (QS.get("otdkey")) localStorage.setItem("radar-otd-key", QS.get("otdkey"));
 const GEOPS_KEY = localStorage.getItem("radar-geops-key") || GEOPS_KEY_CONST;
 const OTD_KEY = localStorage.getItem("radar-otd-key") || OTD_KEY_CONST;
 
-const WS_URL = (key) => `wss://api.geops.io/tracker-ws/v1/ws?key=${encodeURIComponent(key)}`;
+// NB: the endpoint is /tracker-ws/v1/ (trailing slash, no extra path segment),
+// matching geOps' own mobility-toolbox-js client.
+const WS_URL = (key) => `wss://api.geops.io/tracker-ws/v1/?key=${encodeURIComponent(key)}`;
 const FORMATION_API = "https://api.opentransportdata.swiss/formation/v2/formations_stop_based";
 
 const STYLE_URLS = [
@@ -277,6 +279,13 @@ function connect() {
     backoffMs = 1000;
     setLive("ok", "LIVE");
     send("BUFFER 100 100");
+    // BBOX only scopes the stream — the channels must be subscribed explicitly
+    // (GET replays current state, SUB streams updates), same as geOps' own
+    // mobility-toolbox client does.
+    send("GET trajectory");
+    send("SUB trajectory");
+    send("GET deleted_vehicles");
+    send("SUB deleted_vehicles");
     sendBbox();
     if (selectedId) subscribeSelected(selectedId);
     clearInterval(pingTimer);
@@ -330,12 +339,23 @@ function sendBbox() {
   const [minX, minY] = lngLatToMerc(b.getWest(), b.getSouth());
   const [maxX, maxY] = lngLatToMerc(b.getEast(), b.getNorth());
   const zoom = Math.max(0, Math.floor(map.getZoom()));
-  send(`BBOX ${Math.round(minX)} ${Math.round(minY)} ${Math.round(maxX)} ${Math.round(maxY)} ${zoom}`);
+  // The server rejects non-rail modes below zoom 9 anyway; ask explicitly,
+  // mirroring mobility-toolbox's motsByZoom defaults.
+  const mots = zoom < 9 ? "rail" : "tram,subway,rail,bus";
+  send(
+    `BBOX ${Math.floor(minX)} ${Math.floor(minY)} ${Math.ceil(maxX)} ${Math.ceil(maxY)} ${zoom} mots=${mots}`
+  );
 }
 
 function route(msg) {
   if (!msg || typeof msg.source !== "string") return;
   const { source, content } = msg;
+  // With BUFFER active most frames arrive as a buffer envelope wrapping a
+  // list of ordinary messages (the last entry can be null).
+  if (source === "buffer") {
+    if (Array.isArray(content)) for (const inner of content) if (inner) route(inner);
+    return;
+  }
   if (source === "trajectory") {
     if (content) upsertTrajectory(content);
   } else if (source === "deleted_vehicles") {
@@ -1137,10 +1157,18 @@ function installMock() {
     },
   });
 
+  // Delivered inside a buffer envelope, exactly like the live feed with
+  // BUFFER active, so the unwrap path is exercised by the headless tests.
   const feed = () => {
-    route(mkTraj("mock-s2", "S2", "#2d327d", "#ffffff", "rail", s2Path, 240_000, 120));
-    route(mkTraj("mock-ic", "IC 3", "#eb0000", "#ffffff", "rail", icPath, 300_000, 0));
-    route(mkTraj("mock-tram", "11", "#7c8db0", "#0b1020", "tram", tramPath, 180_000, 0));
+    route({
+      source: "buffer",
+      content: [
+        mkTraj("mock-s2", "S2", "#2d327d", "#ffffff", "rail", s2Path, 240_000, 120),
+        mkTraj("mock-ic", "IC 3", "#eb0000", "#ffffff", "rail", icPath, 300_000, 0),
+        mkTraj("mock-tram", "11", "#7c8db0", "#0b1020", "tram", tramPath, 180_000, 0),
+        null,
+      ],
+    });
   };
   feed();
   setInterval(feed, 20_000);
