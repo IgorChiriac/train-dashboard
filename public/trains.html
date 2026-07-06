@@ -18,20 +18,27 @@
   <link rel="preconnect" href="https://tiles.openfreemap.org" />
   <link rel="preconnect" href="https://api.geops.io" />
   <link rel="stylesheet" href="vendor/maplibre-gl.css" />
-  <link rel="stylesheet" href="trains.css?v=1" />
+  <link rel="stylesheet" href="trains.css?v=2" />
 </head>
 <body>
   <div id="map" aria-label="Map of Switzerland"></div>
   <canvas id="radar" aria-hidden="true"></canvas>
 
   <header class="radar-top">
-    <a class="radar-back" href="index.html" aria-label="Back to departure board">←</a>
-    <h1 class="radar-title">Live train radar</h1>
-    <span id="liveDot" class="live live--loading">
-      <span class="live__dot"></span>
-      <span id="liveText" class="live__text">CONNECTING</span>
-    </span>
-    <span id="trainCount" class="radar-count" hidden></span>
+    <div class="radar-bar">
+      <a class="radar-back" href="index.html" aria-label="Back to departure board">←</a>
+      <h1 class="radar-title">Live radar</h1>
+      <span id="liveDot" class="live live--loading">
+        <span class="live__dot"></span>
+        <span id="liveText" class="live__text">CONNECTING</span>
+      </span>
+      <span id="trainCount" class="radar-count" hidden></span>
+    </div>
+    <div id="filters" class="radar-filters" role="group" aria-label="Vehicle types">
+      <button class="modechip" type="button" data-mode="train" aria-pressed="true"><span class="modechip__i">🚆</span>Train</button>
+      <button class="modechip" type="button" data-mode="tram" aria-pressed="true"><span class="modechip__i">🚊</span>Tram</button>
+      <button class="modechip" type="button" data-mode="bus" aria-pressed="true"><span class="modechip__i">🚌</span>Bus</button>
+    </div>
   </header>
 
   <div id="toast" class="radar-toast" role="status" hidden></div>
@@ -67,6 +74,6 @@
   </aside>
 
   <script src="vendor/maplibre-gl.js"></script>
-  <script src="trains.js?v=2"></script>
+  <script src="trains.js?v=3"></script>
 </body>
 </html>
