@@ -254,6 +254,7 @@ let backoffMs = 1000;
 let pingTimer = null;
 let wsOpened = false;
 let failedAttempts = 0; // consecutive connections that never (or barely) opened
+let everWorked = false; // has the key ever produced a live message this session?
 
 function send(cmd) {
   if (MOCK) return mockSend(cmd);
@@ -299,14 +300,24 @@ function connect() {
     } catch {
       return;
     }
+    // Any message means the server accepted the key — the key is good.
+    everWorked = true;
+    failedAttempts = 0;
     route(msg);
   };
 
   ws.onclose = () => {
     clearInterval(pingTimer);
     if (wsState === "suspended" || MOCK) return;
+    // Once the key has worked this session, a close is just the server cycling
+    // the socket (happens on pan/zoom/idle) — reconnect quietly, never re-prompt.
+    if (everWorked) {
+      scheduleReconnect();
+      return;
+    }
     // A rejected key surfaces as connections that die before/right after the
-    // upgrade. Three strikes while online → stop looping and ask for the key.
+    // upgrade and never deliver a message. Three such strikes while online →
+    // stop looping and ask for the key.
     const quick = !wsOpened || Date.now() - connectedAt < 2000;
     failedAttempts = quick ? failedAttempts + 1 : 0;
     if (failedAttempts >= 3 && navigator.onLine !== false) {
