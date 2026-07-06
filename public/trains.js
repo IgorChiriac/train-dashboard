@@ -418,6 +418,7 @@ async function initMap() {
     attributionControl: { compact: true },
   });
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+  setupGeolocation();
   map.on("error", (e) => {
     if (DEBUG) console.warn("map error", e && e.error);
   });
@@ -438,6 +439,52 @@ async function initMap() {
   startLoop();
   if (MOCK) installMock();
   else connect();
+}
+
+// Locate the user, remember the choice, and open the radar centred on them at a
+// ~1–2 km radius (zoom 14) so the first thing they see is the trains nearby.
+// Uses MapLibre's GeolocateControl for the marker/accuracy circle/tracking, and
+// auto-triggers it on load once the preference is set.
+let geolocateCtl = null;
+function setupGeolocation() {
+  geolocateCtl = new maplibregl.GeolocateControl({
+    positionOptions: { enableHighAccuracy: true, timeout: 10_000 },
+    trackUserLocation: true,
+    showUserLocation: true,
+    showAccuracyCircle: true,
+    fitBoundsOptions: { maxZoom: 14 }, // a single fix zooms to ~1–2 km radius
+  });
+  map.addControl(geolocateCtl, "bottom-right");
+
+  // Remember that the user shares location so we auto-locate on every visit.
+  // On the first fix, force a fixed ~1–2 km view (zoom 14) rather than letting
+  // the control fit the GPS accuracy circle — accuracy varies wildly (metres on
+  // a phone, kilometres on desktop wifi) and we want a consistent radius.
+  let didInitialLocate = false;
+  geolocateCtl.on("geolocate", (e) => {
+    localStorage.setItem("radar-geolocate", "on");
+    if (!didInitialLocate && e && e.coords) {
+      didInitialLocate = true;
+      map.easeTo({ center: [e.coords.longitude, e.coords.latitude], zoom: 14, duration: 700 });
+    }
+  });
+  geolocateCtl.on("error", (e) => {
+    // Only stop auto-locating if the user actually denied permission (code 1);
+    // transient failures (timeout/unavailable) shouldn't disable the feature.
+    if (e && e.code === 1) localStorage.setItem("radar-geolocate", "off");
+    if (DEBUG) console.warn("geolocate error", e && e.code, e && e.message);
+  });
+
+  // First visit (pref unset) prompts; afterwards it's silent until they opt out.
+  map.on("load", () => {
+    if (MOCK) return;
+    if (localStorage.getItem("radar-geolocate") === "off") return;
+    try {
+      geolocateCtl.trigger();
+    } catch (_) {
+      /* control not ready — user can still tap the locate button */
+    }
+  });
 }
 
 /* ------------------------------------------------- sprites + render loop */
