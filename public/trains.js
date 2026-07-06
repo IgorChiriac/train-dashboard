@@ -254,6 +254,7 @@ let backoffMs = 1000;
 let pingTimer = null;
 let wsOpened = false;
 let failedAttempts = 0; // consecutive connections that never (or barely) opened
+let everWorked = false; // has the key ever produced a live message this session?
 
 function send(cmd) {
   if (MOCK) return mockSend(cmd);
@@ -299,14 +300,24 @@ function connect() {
     } catch {
       return;
     }
+    // Any message means the server accepted the key — the key is good.
+    everWorked = true;
+    failedAttempts = 0;
     route(msg);
   };
 
   ws.onclose = () => {
     clearInterval(pingTimer);
     if (wsState === "suspended" || MOCK) return;
+    // Once the key has worked this session, a close is just the server cycling
+    // the socket (happens on pan/zoom/idle) — reconnect quietly, never re-prompt.
+    if (everWorked) {
+      scheduleReconnect();
+      return;
+    }
     // A rejected key surfaces as connections that die before/right after the
-    // upgrade. Three strikes while online → stop looping and ask for the key.
+    // upgrade and never deliver a message. Three such strikes while online →
+    // stop looping and ask for the key.
     const quick = !wsOpened || Date.now() - connectedAt < 2000;
     failedAttempts = quick ? failedAttempts + 1 : 0;
     if (failedAttempts >= 3 && navigator.onLine !== false) {
@@ -339,11 +350,10 @@ function sendBbox() {
   const [minX, minY] = lngLatToMerc(b.getWest(), b.getSouth());
   const [maxX, maxY] = lngLatToMerc(b.getEast(), b.getNorth());
   const zoom = Math.max(0, Math.floor(map.getZoom()));
-  // The server rejects non-rail modes below zoom 9 anyway; ask explicitly,
-  // mirroring mobility-toolbox's motsByZoom defaults.
-  const mots = zoom < 9 ? "rail" : "tram,subway,rail,bus";
+  // Ask only for the modes the user has enabled (the server also gates
+  // non-rail modes below zoom 9), mirroring mobility-toolbox's motsByZoom.
   send(
-    `BBOX ${Math.floor(minX)} ${Math.floor(minY)} ${Math.ceil(maxX)} ${Math.ceil(maxY)} ${zoom} mots=${mots}`
+    `BBOX ${Math.floor(minX)} ${Math.floor(minY)} ${Math.ceil(maxX)} ${Math.ceil(maxY)} ${zoom} mots=${activeMots(zoom)}`
   );
 }
 
@@ -512,15 +522,66 @@ function lineColor(v) {
   return v.color || categoryColor(v);
 }
 
+/* ---- vehicle modes: per-mode icons + an on/off filter ---- */
+
+const MODES = {
+  train: { label: "Train", emoji: "🚆", color: "#eb0000" },
+  tram: { label: "Tram", emoji: "🚊", color: "#f39200" },
+  bus: { label: "Bus", emoji: "🚌", color: "#2d8fef" },
+  other: { label: "Other", emoji: "🚠", color: "#7c8db0" },
+};
+const FILTERABLE = ["train", "tram", "bus"];
+
+function modeOf(v) {
+  switch ((v.type || "").toLowerCase()) {
+    case "tram":
+      return "tram";
+    case "bus":
+    case "coach":
+      return "bus";
+    case "rail":
+    case "train":
+    case "subway":
+      return "train";
+    default:
+      return "other"; // ferry / cablecar / gondola / funicular — rarely streamed
+  }
+}
+
+// Which modes are currently shown. Persisted so the choice sticks across visits.
+const activeModes = (() => {
+  const saved = localStorage.getItem("radar-modes");
+  if (saved === null) return new Set(FILTERABLE);
+  return new Set(saved.split(",").filter(Boolean));
+})();
+
+function isVisibleMode(v) {
+  const m = modeOf(v);
+  return m === "other" ? true : activeModes.has(m);
+}
+
+// Only subscribe to the modes the user wants, so the server sends less.
+function activeMots(zoom) {
+  if (zoom < 9) return "rail"; // server only streams rail below zoom 9
+  const m = [];
+  if (activeModes.has("train")) m.push("rail", "subway");
+  if (activeModes.has("tram")) m.push("tram");
+  if (activeModes.has("bus")) m.push("bus");
+  return m.length ? m.join(",") : "rail";
+}
+
 const spriteCache = new Map(); // key → {canvas, w, h, ax, ay}
 const SPRITE_CACHE_MAX = 400;
 
 function getSprite(v, bucket) {
+  const mode = modeOf(v);
   const delayTxt = bucket === 3 && v.delayMin >= 1 ? `+${v.delayMin}′` : "";
-  const key = `${bucket}|${v.name}|${lineColor(v)}|${v.textColor}|${delayTxt}`;
+  const key = `${bucket}|${mode}|${v.name}|${lineColor(v)}|${v.textColor}|${delayTxt}`;
   let s = spriteCache.get(key);
   if (s) return s;
-  s = bucket <= 1 ? makeCircleSprite(v, bucket) : makeBadgeSprite(v, bucket, delayTxt);
+  if (bucket === 0) s = makeDotSprite(mode);
+  else if (bucket === 1) s = makeIconSprite(v, mode);
+  else s = makeBadgeSprite(v, bucket, mode, delayTxt);
   if (spriteCache.size >= SPRITE_CACHE_MAX) {
     spriteCache.delete(spriteCache.keys().next().value);
   }
@@ -537,41 +598,59 @@ function makeSpriteCanvas(w, h) {
   return [c, g];
 }
 
-function makeCircleSprite(v, bucket) {
-  const r = bucket === 0 ? 3 : 8;
+// bucket 0 — country overview: a small dot coloured by mode, so trains, trams
+// and buses stay distinguishable even fully zoomed out.
+function makeDotSprite(mode) {
+  const r = 3.5;
+  const pad = 2;
+  const size = r * 2 + pad * 2;
+  const [c, g] = makeSpriteCanvas(size, size);
+  const cx = size / 2;
+  g.beginPath();
+  g.arc(cx, cx, r, 0, Math.PI * 2);
+  g.fillStyle = MODES[mode].color;
+  g.fill();
+  return { canvas: c, w: size, h: size, ax: cx, ay: cx };
+}
+
+// bucket 1 — the mode icon on a dark disc ringed in the line colour.
+function makeIconSprite(v, mode) {
+  const r = 12;
   const pad = 3;
   const size = r * 2 + pad * 2;
   const [c, g] = makeSpriteCanvas(size, size);
   const cx = size / 2;
   g.beginPath();
   g.arc(cx, cx, r, 0, Math.PI * 2);
-  g.fillStyle = bucket === 0 ? categoryColor(v) : lineColor(v);
+  g.fillStyle = "rgba(11,16,32,0.72)";
   g.fill();
-  if (bucket === 1) {
-    g.lineWidth = 1.5;
-    g.strokeStyle = "rgba(255,255,255,0.85)";
-    g.stroke();
-    // direction notch (points up; rotated at draw time)
-    g.beginPath();
-    g.moveTo(cx, cx - r - 2.5);
-    g.lineTo(cx - 3.5, cx - r + 3);
-    g.lineTo(cx + 3.5, cx - r + 3);
-    g.closePath();
-    g.fillStyle = "rgba(255,255,255,0.95)";
-    g.fill();
-  }
-  return { canvas: c, w: size, h: size, ax: cx, ay: cx, rotates: bucket === 1 };
+  g.lineWidth = 2;
+  g.strokeStyle = lineColor(v);
+  g.stroke();
+  g.font = '13px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText(MODES[mode].emoji, cx, cx + 0.5);
+  return { canvas: c, w: size, h: size, ax: cx, ay: cx };
 }
 
-function makeBadgeSprite(v, bucket, delayTxt) {
+// bucket 2/3 — pill badge: mode icon + line name (+ delay chip at bucket 3).
+function makeBadgeSprite(v, bucket, mode, delayTxt) {
   const fontPx = bucket === 3 ? 13 : 11;
   const hBadge = bucket === 3 ? 24 : 20;
+  const emojiPx = bucket === 3 ? 14 : 12;
   const font = `800 ${fontPx}px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
+  const emojiFont = `${emojiPx}px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
   const meas = document.createElement("canvas").getContext("2d");
   meas.font = font;
-  const label = v.name || "•";
-  const wText = meas.measureText(label).width;
-  const wBadge = Math.max(hBadge, Math.ceil(wText) + 14);
+  const label = v.name || "";
+  const wText = label ? Math.ceil(meas.measureText(label).width) : 0;
+  const emoji = MODES[mode].emoji;
+  meas.font = emojiFont;
+  const wEmoji = Math.ceil(meas.measureText(emoji).width);
+  const gapText = label ? 5 : 0;
+  const contentW = wEmoji + gapText + wText;
+  const wBadge = Math.max(hBadge, contentW + 20);
   const chipFont = `700 10px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
   meas.font = chipFont;
   const wChip = delayTxt ? Math.ceil(meas.measureText(delayTxt).width) + 10 : 0;
@@ -589,28 +668,36 @@ function makeBadgeSprite(v, bucket, delayTxt) {
   g.lineWidth = 1;
   g.strokeStyle = "rgba(255,255,255,0.55)";
   g.stroke();
-  g.font = font;
-  g.textAlign = "center";
+
+  const cy = y + hBadge / 2 + 0.5;
+  let cursor = x + (wBadge - contentW) / 2;
   g.textBaseline = "middle";
-  g.fillStyle = v.textColor;
-  g.fillText(label, x + wBadge / 2, y + hBadge / 2 + 0.5);
+  g.textAlign = "left";
+  g.font = emojiFont;
+  g.fillText(emoji, cursor, cy);
+  cursor += wEmoji + gapText;
+  if (label) {
+    g.font = font;
+    g.fillStyle = v.textColor;
+    g.fillText(label, cursor, cy);
+  }
 
   if (wChip) {
-    const cx = x + wBadge + 4;
+    const chx = x + wBadge + 4;
     const hChip = 15;
-    const cy = y + (hBadge - hChip) / 2;
+    const chy = y + (hBadge - hChip) / 2;
     g.beginPath();
-    g.roundRect(cx, cy, wChip, hChip, 7);
+    g.roundRect(chx, chy, wChip, hChip, 7);
     g.fillStyle = "#3a1220";
     g.fill();
     g.strokeStyle = "#ff6b6b";
     g.stroke();
     g.font = chipFont;
     g.fillStyle = "#ff6b6b";
-    g.fillText(delayTxt, cx + wChip / 2, cy + hChip / 2 + 0.5);
+    g.textAlign = "center";
+    g.fillText(delayTxt, chx + wChip / 2, chy + hChip / 2 + 0.5);
   }
-  // anchor on the badge centre so the badge sits on the position
-  return { canvas: c, w, h, ax: pad + wBadge / 2, ay: h / 2, rotates: false };
+  return { canvas: c, w, h, ax: pad + wBadge / 2, ay: h / 2 };
 }
 
 let rafId = null;
@@ -646,8 +733,13 @@ function frame() {
 
   const bucket = zoomBucket(map.getZoom());
   let selected = null;
+  let shown = 0;
 
   for (const v of vehicles.values()) {
+    if (!isVisibleMode(v)) {
+      v.screen = null;
+      continue;
+    }
     const pos = positionAt(v, now);
     if (!pos || Math.abs(pos.lat) > 72) {
       v.screen = null;
@@ -659,6 +751,7 @@ function frame() {
       continue;
     }
     v.screen = { x: pt.x, y: pt.y };
+    shown++;
     if (v.id === selectedId) {
       selected = { v, pos, pt };
       continue; // drawn last, on top
@@ -668,44 +761,37 @@ function frame() {
 
   if (selected) {
     ctx.beginPath();
-    ctx.arc(selected.pt.x, selected.pt.y, bucket <= 1 ? 13 : 17, 0, Math.PI * 2);
+    ctx.arc(selected.pt.x, selected.pt.y, bucket <= 1 ? 15 : 17, 0, Math.PI * 2);
     ctx.strokeStyle = "#ffd23f";
     ctx.lineWidth = 2.5;
     ctx.stroke();
     drawVehicle(selected.v, selected.pos, selected.pt, bucket);
   }
 
-  if (frameNo % 60 === 0 && vehicles.size !== lastCount) {
-    lastCount = vehicles.size;
-    trainCount.hidden = lastCount === 0;
-    trainCount.textContent = `${lastCount} trains`;
+  if (frameNo % 30 === 0 && shown !== lastCount) {
+    lastCount = shown;
+    trainCount.hidden = shown === 0;
+    trainCount.textContent = `${shown} in view`;
   }
 }
 
 function drawVehicle(v, pos, pt, bucket) {
   const s = getSprite(v, bucket);
-  if (s.rotates) {
+  ctx.drawImage(s.canvas, pt.x - s.ax, pt.y - s.ay, s.w, s.h);
+  if (bucket >= 1) {
+    // heading tick so direction stays visible without rotating the icon
     ctx.save();
     ctx.translate(pt.x, pt.y);
     ctx.rotate(pos.heading);
-    ctx.drawImage(s.canvas, -s.ax, -s.ay, s.w, s.h);
+    const r = bucket === 1 ? 15 : 16;
+    ctx.beginPath();
+    ctx.moveTo(0, -r);
+    ctx.lineTo(-3.5, -r + 6);
+    ctx.lineTo(3.5, -r + 6);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.fill();
     ctx.restore();
-  } else {
-    ctx.drawImage(s.canvas, pt.x - s.ax, pt.y - s.ay, s.w, s.h);
-    if (bucket >= 2) {
-      // small heading tick above the badge so direction stays visible
-      ctx.save();
-      ctx.translate(pt.x, pt.y);
-      ctx.rotate(pos.heading);
-      ctx.beginPath();
-      ctx.moveTo(0, -16);
-      ctx.lineTo(-3.5, -10);
-      ctx.lineTo(3.5, -10);
-      ctx.closePath();
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.fill();
-      ctx.restore();
-    }
   }
 }
 
@@ -1296,6 +1382,36 @@ function installMock() {
   };
 }
 
+/* ----------------------------------------------------------- mode filter */
+
+function setupFilters() {
+  document.querySelectorAll("#filters .modechip").forEach((chip) => {
+    chip.addEventListener("click", () => toggleMode(chip.dataset.mode));
+  });
+  updateFilterUI();
+}
+
+function updateFilterUI() {
+  document.querySelectorAll("#filters .modechip").forEach((chip) => {
+    chip.setAttribute("aria-pressed", activeModes.has(chip.dataset.mode) ? "true" : "false");
+  });
+}
+
+function toggleMode(mode) {
+  if (activeModes.has(mode)) activeModes.delete(mode);
+  else activeModes.add(mode);
+  localStorage.setItem("radar-modes", [...activeModes].join(","));
+  updateFilterUI();
+  // Drop now-hidden vehicles immediately, then re-subscribe with the new modes.
+  for (const [id, v] of vehicles) {
+    if (!isVisibleMode(v)) {
+      vehicles.delete(id);
+      if (id === selectedId) deselect();
+    }
+  }
+  sendBbox();
+}
+
 /* ------------------------------------------------------------------ boot */
 
 if (!MOCK && !GEOPS_KEY) {
@@ -1303,6 +1419,7 @@ if (!MOCK && !GEOPS_KEY) {
   openKeySheet();
 }
 
+setupFilters();
 initMap();
 
 if (MOCK || DEBUG) {
@@ -1313,5 +1430,8 @@ if (MOCK || DEBUG) {
     deselect,
     getMap: () => map,
     wsState: () => wsState,
+    activeModes,
+    toggleMode,
+    modeOf,
   };
 }
