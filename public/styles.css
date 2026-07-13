@@ -143,6 +143,24 @@ body {
   opacity: 0.5;
   filter: saturate(0.6);
 }
+/* Cancelled — SBB pulled this train. Shown loudly (not hidden or dimmed) so you
+   never head out for a train that won't run. Overrides the "quick S2" look. */
+.card--cancelled {
+  border-color: var(--danger);
+  background: linear-gradient(135deg, rgba(255, 107, 107, 0.12), var(--card));
+  box-shadow: 0 10px 30px rgba(255, 107, 107, 0.18);
+}
+.card--cancelled .line {
+  background: rgba(255, 107, 107, 0.16);
+  border-color: var(--danger);
+  color: var(--danger);
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+.card--cancelled .dep-time {
+  text-decoration: line-through;
+  text-decoration-color: var(--danger);
+}
 /* The train you've decided on. */
 .card--selected {
   border-color: var(--accent);
@@ -223,6 +241,7 @@ body {
   letter-spacing: 0.08em;
 }
 .countdown--now .countdown__min { color: var(--danger); }
+.countdown--cancelled .countdown__min { color: var(--danger); }
 .countdown--boarding .countdown__min { color: var(--accent); }
 .countdown--run .countdown__min { color: var(--accent); }
 .countdown--walking .countdown__min { color: var(--accent-soft); }
@@ -265,6 +284,8 @@ body {
 .catch-timer--gone .catch-timer__clock { color: var(--muted); }
 .catch-timer--walking { border-color: var(--accent-soft); }
 .catch-timer--walking .catch-timer__clock { color: var(--accent-soft); }
+.catch-timer--cancelled { border-color: var(--danger); }
+.catch-timer--cancelled .catch-timer__clock { color: var(--danger); }
 
 /* "I'm walking" toggle */
 .walk-toggle {
@@ -501,6 +522,7 @@ body {
   white-space: nowrap;
 }
 .chip--late { color: #2a0d0d; background: var(--danger); }
+.chip--cancelled { color: #2a0d0d; background: var(--danger); font-weight: 800; }
 .chip--ontime { color: var(--accent-soft); background: rgba(61, 220, 132, 0.14); }
 .chip--run { color: #1a1300; background: var(--accent); }
 .chip--walking { color: #06210f; background: var(--accent-soft); }

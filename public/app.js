@@ -12,6 +12,15 @@
  */
 
 const API = "https://transport.opendata.ch/v1/connections";
+// transport.opendata.ch drives the board, but its data model carries no
+// cancellation flag at all (a Prognosis only has platform/arrival/departure/
+// capacity) — so a cancelled train comes back looking perfectly normal and used
+// to just count down and vanish as "gone". We overlay search.ch's timetable,
+// which *does* report cancellations, purely to flag those trains. The overlay is
+// best-effort and fail-safe: any error (network, CORS, schema drift, no match)
+// simply leaves every train un-flagged, so the board never regresses and never
+// invents a cancellation that isn't there.
+const CANCEL_API = "https://timetable.search.ch/api/route.json";
 const GEO_API = "https://geocoding-api.open-meteo.com/v1/search";
 const WX_API = "https://api.open-meteo.com/v1/forecast";
 const QUICK_LINE = "S2";
@@ -191,6 +200,80 @@ function lineOf(conn) {
 }
 function isQuick(conn) {
   return lineOf(conn).toUpperCase() === QUICK_LINE;
+}
+
+// True once the search.ch overlay has flagged this train as cancelled.
+function isCancelled(conn) {
+  return !!(conn && conn._cancelled);
+}
+
+/* ---------- cancellation overlay (search.ch) ---------- */
+
+// Normalise a line label for matching across the two providers ("S 2" → "S2").
+function normLine(line) {
+  return String(line || "").replace(/\s+/g, "").toUpperCase();
+}
+
+// Match key shared by both feeds: local departure HH:MM + line. The planned
+// departure minute is stable and unique enough per route to line the two up.
+// (Assumes the board runs in Switzerland's timezone — opendata departures carry
+// an offset we render as local wall-clock, search.ch reports local HH:MM — which
+// holds for this personal CH commute board.)
+function cancelKeyForConn(conn) {
+  const planned = conn.from && conn.from.departure;
+  if (!planned) return null;
+  return `${formatClock(new Date(planned))}|${normLine(lineOf(conn))}`;
+}
+
+function buildCancelUrl(from, to) {
+  // No date/time → search.ch returns connections from "now", which is exactly
+  // the window the board shows. Fewer params means fewer ways to be wrong.
+  const params = new URLSearchParams({
+    from, to, num: String(LIMIT + MAX_PAST + 2),
+  });
+  return `${CANCEL_API}?${params.toString()}`;
+}
+
+// search.ch encodes a cancelled departure/arrival as the delay string "X"
+// (and may also expose a boolean `cancelled`). We only ever treat an
+// unambiguous positive signal as a cancellation — anything else is "running".
+function legCancelled(leg) {
+  if (!leg) return false;
+  if (leg.cancelled === true) return true;
+  const dep = String(leg.dep_delay == null ? "" : leg.dep_delay).toUpperCase();
+  const arr = String(leg.arr_delay == null ? "" : leg.arr_delay).toUpperCase();
+  return dep === "X" || arr === "X";
+}
+
+// Build the set of cancel-keys that search.ch reports as cancelled.
+function parseCancellations(data) {
+  const set = new Set();
+  const conns = (data && data.connections) || [];
+  for (const c of conns) {
+    const legs = c.legs || [];
+    const cancelled = c.cancelled === true || legs.some(legCancelled);
+    if (!cancelled) continue;
+    // The first leg with a line is the boarding train; key off it.
+    const leg = legs.find((l) => l && l.line) || legs[0] || {};
+    const dep = c.departure || leg.departure; // "YYYY-MM-DD HH:MM:SS" (local)
+    const m = dep && String(dep).match(/(\d{2}):(\d{2})/);
+    if (!m) continue;
+    set.add(`${m[1]}:${m[2]}|${normLine(leg.line)}`);
+  }
+  return set;
+}
+
+// Fetch + flag. Never throws: on any failure it returns an empty set so the
+// board simply shows no cancellations rather than breaking or guessing.
+async function fetchCancellations(from, to) {
+  try {
+    const res = await fetch(buildCancelUrl(from, to));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return parseCancellations(await res.json());
+  } catch (err) {
+    console.warn("Cancellation overlay unavailable:", err.message);
+    return new Set();
+  }
 }
 
 function departureDate(conn) {
@@ -378,14 +461,26 @@ async function loadDepartures() {
       .filter((c) => c.from && c.from.departure)
       .filter((c) => (c.transfers || 0) === 0); // direct only
     lastFetchOk = true;
+
+    // Overlay cancellations from search.ch (fail-safe: no flags on any error).
+    const cancelled = await fetchCancellations(p.origin.station, p.dest.station);
+    if (cancelled.size) {
+      connections.forEach((c) => {
+        const key = cancelKeyForConn(c);
+        if (key && cancelled.has(key)) c._cancelled = true;
+      });
+    }
+
     render();
     const offline = !navigator.onLine;
     setLive(offline ? "error" : "ok");
     els.status.classList.remove("status--error");
     els.updated.textContent = `updated ${formatClockSec(new Date())}`;
+    const cancelledCount = connections.filter(isCancelled).length;
+    const cancelNote = cancelledCount ? ` · ${cancelledCount} cancelled` : "";
     els.status.textContent = offline
-      ? `${connections.length} trains · offline (cached)`
-      : `${connections.length} trains · auto-refresh 60s`;
+      ? `${connections.length} trains · offline (cached)${cancelNote}`
+      : `${connections.length} trains · auto-refresh 60s${cancelNote}`;
     restartRefreshBar();
   } catch (err) {
     console.error(err);
@@ -430,11 +525,12 @@ function cardHtml(conn, now) {
   const p = path();
   const dep = departureDate(conn);
   const line = lineOf(conn);
-  const quick = isQuick(conn);
+  const cancelled = isCancelled(conn);
+  const quick = isQuick(conn) && !cancelled; // a cancelled train isn't a "quick" option
   const delay = delayMinutes(conn);
   const key = connKey(conn);
   const selected = key === selectedKey;
-  const isWalking = selected && walking; // you've left → count to the train, calmly
+  const isWalking = selected && walking && !cancelled; // you've left → count to the train, calmly
 
   const msToDep = dep.getTime() - now;
   const minsToDep = Math.round(msToDep / 60000);
@@ -456,7 +552,11 @@ function cardHtml(conn, now) {
   // drop the go!/run!/gone drama — you're already on your way.
   let cdClass = "countdown";
   let bigText, bigLabel;
-  if (isWalking) {
+  if (cancelled) {
+    cdClass += " countdown--cancelled";
+    bigText = "✕";
+    bigLabel = "cancelled";
+  } else if (isWalking) {
     cdClass += " countdown--walking";
     if (departed) { bigText = "now"; bigLabel = "train leaving"; }
     else { bigText = `${minsToDep}`; bigLabel = "min till it leaves"; }
@@ -479,17 +579,24 @@ function cardHtml(conn, now) {
   }
 
   let statusChip = "";
-  if (delay > 0) statusChip = `<span class="chip chip--late">+${delay}′ late</span>`;
+  if (cancelled) statusChip = `<span class="chip chip--cancelled">✕ Cancelled</span>`;
+  else if (delay > 0) statusChip = `<span class="chip chip--late">+${delay}′ late</span>`;
   else if (hasPrognosis(conn)) statusChip = `<span class="chip chip--ontime">on time</span>`;
 
-  const meta = [
+  // A cancelled train drops the leave-by/arrival planning (you must not head out
+  // for it) and says so plainly; a running train shows the full door-to-door meta.
+  const meta = (cancelled ? [
+    `🚫 <strong>Cancelled</strong> — don't leave for this one`,
+    `🚆 ${formatClock(dep)}${arrivalDate ? `→${formatClock(arrivalDate)}` : ""}`,
+    platform,
+  ] : [
     `🚶 leave by <strong>${formatClock(leaveBy)}</strong>`,
     `🚆 ${formatClock(dep)}${arrivalDate ? `→${formatClock(arrivalDate)}` : ""}`,
     atDest ? `🏁 ${p.dest.name} by <strong>${formatClock(atDest)}</strong>` : "",
     duration ? `⏱ ${duration}` : "",
     platform,
     transfers > 0 ? `${transfers} transfer${transfers > 1 ? "s" : ""}` : "direct",
-  ].filter(Boolean).join(`<span class="dot">·</span>`);
+  ]).filter(Boolean).join(`<span class="dot">·</span>`);
 
   // When you pick a train, show a live ticking timer (mm:ss to departure) plus
   // an "I'm walking" toggle. While walking we show the time the train is at
@@ -497,7 +604,19 @@ function cardHtml(conn, now) {
   // know when to be there. (The boarding stop only exposes a departure time,
   // which is when the train is at your platform.)
   let catchTimer = "";
-  if (selected) {
+  if (selected && cancelled) {
+    // No countdown and no "I'm walking" for a train that isn't running — just
+    // say so and nudge you to the next one.
+    catchTimer = `
+      <div class="catch-timer catch-timer--cancelled">
+        <div class="catch-timer__info">
+          <div class="catch-timer__row">
+            <span class="catch-timer__clock">✕</span>
+            <span class="catch-timer__label">cancelled — pick another train</span>
+          </div>
+        </div>
+      </div>`;
+  } else if (selected) {
     let cls, clock, label, sub = "";
     if (isWalking) {
       cls = "catch-timer--walking";
@@ -527,10 +646,11 @@ function cardHtml(conn, now) {
   const cardClasses = [
     "card",
     quick ? "card--s2" : "",
+    cancelled ? "card--cancelled" : "",
     selected ? "card--selected" : "",
     isWalking ? "card--walking" : "",
-    (pastWalk && !isWalking) ? "card--run" : "",
-    (departed && !isWalking) ? "card--gone" : "",
+    (pastWalk && !isWalking && !cancelled) ? "card--run" : "",
+    (departed && !isWalking && !cancelled) ? "card--gone" : "",
   ].filter(Boolean).join(" ");
 
   return `
