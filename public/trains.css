@@ -19,6 +19,11 @@
 
 * { box-sizing: border-box; }
 
+/* Embedded as the board's "live view" iframe: drop this page's own top chrome
+   (back/title/filters) — the board's focus overlay frames it — and keep just the
+   map + the auto-opened train-info sheet. */
+body.embed .radar-top { display: none; }
+
 html, body {
   margin: 0;
   height: 100%;

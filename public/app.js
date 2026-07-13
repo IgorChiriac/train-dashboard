@@ -86,6 +86,20 @@ const els = {
   liveDot: document.getElementById("liveDot"),
   liveText: document.getElementById("liveText"),
   weather: document.getElementById("weather"),
+  // focus (live-view) screen
+  focus: document.getElementById("focus"),
+  focusLine: document.getElementById("focusLine"),
+  focusFrom: document.getElementById("focusFrom"),
+  focusTo: document.getElementById("focusTo"),
+  focusClose: document.getElementById("focusClose"),
+  focusTimer: document.getElementById("focusTimer"),
+  focusTimerLabel: document.getElementById("focusTimerLabel"),
+  focusStatus: document.getElementById("focusStatus"),
+  focusWalk: document.getElementById("focusWalk"),
+  focusMeta: document.getElementById("focusMeta"),
+  focusMap: document.getElementById("focusMap"),
+  focusMapLink: document.getElementById("focusMapLink"),
+  focusMapHint: document.getElementById("focusMapHint"),
 };
 
 let connections = [];
@@ -98,6 +112,9 @@ let prefs = { walks: {}, coords: {} };
 // The train you've "decided on": a stable key (planned departure + line) so the
 // selection survives refreshes and live re-renders. null = nothing picked.
 let selectedKey = null;
+// The full-screen "Live view" for the picked train is open. It always mirrors
+// the currently selected train; closing it doesn't clear the selection.
+let focusOpen = false;
 // "I'm walking": you've left the door, so stop the dramatic leave-by countdown
 // and calmly count down to the train leaving instead. Only meaningful for the
 // selected train; reset whenever the selection changes.
@@ -286,6 +303,31 @@ function departureDate(conn) {
 // refreshes (planned time doesn't drift) so a selected train stays selected.
 function connKey(conn) {
   return `${conn.from && conn.from.departure}|${lineOf(conn)}`;
+}
+
+// The train's journey object (opendata puts the run on the first section that
+// actually has a journey — a direct S2 has exactly one).
+function journeyOf(conn) {
+  const sec = (conn.sections || []).find((s) => s && s.journey);
+  return (sec && sec.journey) || {};
+}
+
+// The operational train/run number (e.g. 18265), used to line this connection
+// up with the same vehicle on the geOps radar. Best-effort: opendata exposes it
+// as journey.number, else we scrape a run number out of the journey name.
+function trainNumberOf(conn) {
+  const j = journeyOf(conn);
+  const num = j.number != null ? String(j.number).replace(/\D/g, "") : "";
+  if (num) return num;
+  const m = String(j.name || "").match(/\d{3,}/);
+  return m ? m[0] : null;
+}
+
+// Where the train is ultimately heading (its final destination), for the map
+// context line — not the same as *your* alighting stop.
+function directionOf(conn) {
+  const j = journeyOf(conn);
+  return j.to || (conn.to && conn.to.station && conn.to.station.name) || "";
 }
 
 function delayMinutes(conn) {
@@ -512,13 +554,171 @@ function render() {
     return;
   }
 
-  // Drop a stale selection (its train already rolled off the board).
+  // Drop a stale selection (its train already rolled off the board), and with it
+  // the live view — there's nothing left to focus on.
   if (selectedKey && !upcoming.some((c) => connKey(c) === selectedKey)) {
     selectedKey = null;
     walking = false;
+    if (focusOpen) closeFocus();
   }
 
   els.board.innerHTML = upcoming.map((conn) => cardHtml(conn, now)).join("");
+  if (focusOpen) renderFocus();
+}
+
+/* ---------- focus (live-view) screen ---------- */
+
+const RADAR_PAGE = "trains.html";
+// The iframe is rebuilt only when the focused train changes (tracked here), so
+// per-second re-renders don't reset the map and its websocket every tick.
+let focusMapFor = null;
+
+function focusConn() {
+  if (!selectedKey) return null;
+  return connections.find((c) => connKey(c) === selectedKey) || null;
+}
+
+// Build the radar URL centred on the commute corridor, hinting the line + train
+// number so the radar can auto-follow this exact vehicle when it appears.
+function radarSrc(conn, embed) {
+  const p = path();
+  const a = KNOWN_COORDS[p.origin.station];
+  const b = KNOWN_COORDS[p.dest.station];
+  const c = a && b ? { lat: (a.lat + b.lat) / 2, lon: (a.lon + b.lon) / 2 } : (a || b || { lat: 47.32, lon: 8.54 });
+  const params = new URLSearchParams({ center: `${c.lon},${c.lat}`, zoom: "11", line: lineOf(conn) });
+  if (embed) params.set("embed", "1");
+  const num = trainNumberOf(conn);
+  if (num) params.set("trainno", num);
+  return `${RADAR_PAGE}?${params.toString()}`;
+}
+
+function mountFocusMap() {
+  const conn = focusConn();
+  if (!conn) return;
+  els.focusMapLink.href = radarSrc(conn, false);
+  // Already resolved for this train (iframe mounted OR no-key hint shown)? Leave
+  // it — rebuilding each tick would reset the map/socket every second.
+  if (focusMapFor === selectedKey && (els.focusMap.firstChild || !els.focusMapHint.hidden)) return;
+  focusMapFor = selectedKey;
+
+  // No geOps key stored (by the radar) → the embedded map can't stream. Show a
+  // helpful hint instead of an iframe that just nags for a key.
+  const hasKey = (() => { try { return !!localStorage.getItem("radar-geops-key"); } catch (_) { return false; } })();
+  if (!hasKey) {
+    els.focusMap.replaceChildren();
+    els.focusMapHint.hidden = false;
+    els.focusMapHint.innerHTML =
+      `Add a free <a href="https://developer.geops.io" target="_blank" rel="noopener">geOps key</a> to the ` +
+      `<a href="${radarSrc(conn, false)}">live map</a> once and it shows here too.`;
+    return;
+  }
+  els.focusMapHint.hidden = true;
+  const iframe = document.createElement("iframe");
+  iframe.className = "focus__mapframe";
+  iframe.title = "Live train radar";
+  iframe.loading = "lazy";
+  iframe.allow = "geolocation";
+  iframe.src = radarSrc(conn, true);
+  els.focusMap.replaceChildren(iframe);
+}
+
+function openFocus() {
+  const conn = focusConn();
+  if (!conn) return;
+  focusOpen = true;
+  els.focus.hidden = false;
+  document.body.classList.add("focus-open");
+  focusMapFor = null; // force a fresh mount for this train
+  mountFocusMap();
+  renderFocus();
+}
+
+function closeFocus() {
+  focusOpen = false;
+  els.focus.hidden = true;
+  document.body.classList.remove("focus-open");
+  els.focusMap.replaceChildren(); // tear down the iframe → stops its websocket
+  focusMapFor = null;
+}
+
+function metaRow(term, val) {
+  return val ? `<div class="focus__mrow"><dt>${term}</dt><dd>${val}</dd></div>` : "";
+}
+
+function renderFocus() {
+  if (!focusOpen) return;
+  const conn = focusConn();
+  if (!conn) {
+    els.focusTimer.textContent = "—";
+    els.focusTimerLabel.textContent = "this train is no longer listed";
+    els.focusStatus.innerHTML = "";
+    els.focusMeta.innerHTML = "";
+    return;
+  }
+  const p = path();
+  const now = Date.now();
+  const dep = departureDate(conn);
+  const cancelled = isCancelled(conn);
+  const delay = delayMinutes(conn);
+  const msToDep = dep.getTime() - now;
+  const leaveBy = new Date(dep.getTime() - p.origin.walk * 60000);
+  const msToLeave = leaveBy.getTime() - now;
+  const departed = msToDep <= 0;
+  const isWalking = walking && !cancelled;
+
+  const arrivalDate = conn.to && conn.to.arrival ? new Date(conn.to.arrival) : null;
+  const atDest = arrivalDate ? new Date(arrivalDate.getTime() + p.dest.walk * 60000) : null;
+
+  // header
+  els.focusLine.textContent = lineOf(conn);
+  els.focusFrom.textContent = p.origin.name;
+  els.focusTo.textContent = p.dest.name;
+
+  // big timer + label + state colour
+  let timer, label, state;
+  if (cancelled) {
+    timer = "✕"; label = "cancelled — pick another train"; state = "cancelled";
+  } else if (departed) {
+    const agoMin = Math.round(-msToDep / 60000);
+    timer = "gone"; label = agoMin >= 1 ? `left ${agoMin} min ago` : "just left"; state = "gone";
+  } else if (isWalking) {
+    timer = formatCountdown(msToDep); label = `until it leaves · 🚶 you're walking`; state = "walking";
+  } else if (msToLeave > 0) {
+    timer = formatCountdown(msToLeave); label = `until you leave ${p.origin.name}`; state = msToLeave <= 120000 ? "boarding" : "ok";
+  } else {
+    timer = formatCountdown(msToDep); label = `🏃 run — until it leaves`; state = "run";
+  }
+  els.focusTimer.textContent = timer;
+  els.focusTimer.className = `focus__timer focus__timer--${state}`;
+  els.focusTimerLabel.textContent = label;
+
+  // status chip
+  let chip = "";
+  if (cancelled) chip = `<span class="chip chip--cancelled">✕ Cancelled</span>`;
+  else if (delay > 0) chip = `<span class="chip chip--late">+${delay}′ late</span>`;
+  else if (hasPrognosis(conn)) chip = `<span class="chip chip--ontime">on time</span>`;
+  const dir = directionOf(conn);
+  els.focusStatus.innerHTML = chip + (dir ? `<span class="focus__dir">→ ${dir}</span>` : "");
+
+  // walk toggle (meaningless once cancelled/departed)
+  const walkable = !cancelled && !departed;
+  els.focusWalk.hidden = !walkable;
+  els.focusWalk.classList.toggle("walk-toggle--on", isWalking);
+  els.focusWalk.setAttribute("aria-pressed", String(isWalking));
+  els.focusWalk.textContent = isWalking ? "I’m walking ✓" : "🚶 I’m walking";
+
+  // details grid
+  els.focusMeta.innerHTML =
+    metaRow("Departs", `<strong>${formatClock(dep)}</strong>${arrivalDate ? ` → ${formatClock(arrivalDate)}` : ""}`) +
+    metaRow("Leave by", cancelled ? "—" : `<strong>${formatClock(leaveBy)}</strong>`) +
+    metaRow(`${p.dest.name} by`, atDest ? `<strong>${formatClock(atDest)}</strong>` : "") +
+    metaRow("Platform", conn.from.platform ? `Pl. ${conn.from.platform}` : "") +
+    metaRow("Trip", formatDuration(conn.duration));
+
+  els.focus.classList.toggle("focus--cancelled", cancelled);
+
+  // Keep the embedded map in sync if the focused train changed.
+  mountFocusMap();
 }
 
 function cardHtml(conn, now) {
@@ -603,6 +803,9 @@ function cardHtml(conn, now) {
   // *your* (departing) station — the platform you're walking toward — so you
   // know when to be there. (The boarding stop only exposes a departure time,
   // which is when the train is at your platform.)
+  // Opens the full-screen live view (big timer + status + the train on the map).
+  const focusBtn = `<button type="button" class="focus-open-btn" data-action="focus">🛰 Live view</button>`;
+
   let catchTimer = "";
   if (selected && cancelled) {
     // No countdown and no "I'm walking" for a train that isn't running — just
@@ -615,6 +818,7 @@ function cardHtml(conn, now) {
             <span class="catch-timer__label">cancelled — pick another train</span>
           </div>
         </div>
+        ${focusBtn}
       </div>`;
   } else if (selected) {
     let cls, clock, label, sub = "";
@@ -639,7 +843,7 @@ function cardHtml(conn, now) {
           </div>
           ${sub ? `<div class="catch-timer__sub">${sub}</div>` : ""}
         </div>
-        ${walkBtn}
+        <div class="catch-timer__actions">${focusBtn}${walkBtn}</div>
       </div>`;
   }
 
@@ -711,18 +915,28 @@ function toggleSelect(card) {
   render();
 }
 els.board.addEventListener("click", (e) => {
-  // The "I'm walking" toggle lives inside the card; handle it without also
+  // The in-card buttons ("I'm walking", "Live view") must act without also
   // toggling the card's selection.
   const walkBtn = e.target.closest("[data-action='walk']");
   if (walkBtn) { e.stopPropagation(); walking = !walking; render(); return; }
+  const focusBtn = e.target.closest("[data-action='focus']");
+  if (focusBtn) { e.stopPropagation(); openFocus(); return; }
   const card = e.target.closest(".card");
   if (card) toggleSelect(card);
 });
 els.board.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" && e.key !== " ") return;
-  if (e.target.closest("[data-action='walk']")) return; // the button handles itself
+  if (e.target.closest("[data-action]")) return; // in-card buttons handle themselves
   const card = e.target.closest(".card");
   if (card) { e.preventDefault(); toggleSelect(card); }
+});
+
+/* ---------- focus screen events ---------- */
+
+els.focusClose.addEventListener("click", closeFocus);
+els.focusWalk.addEventListener("click", () => { walking = !walking; renderFocus(); render(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && focusOpen) closeFocus();
 });
 
 /* ---------- init ---------- */
