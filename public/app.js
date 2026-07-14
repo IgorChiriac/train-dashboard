@@ -585,8 +585,8 @@ function radarSrc(conn, embed) {
   const a = KNOWN_COORDS[p.origin.station];
   const b = KNOWN_COORDS[p.dest.station];
   const c = a && b ? { lat: (a.lat + b.lat) / 2, lon: (a.lon + b.lon) / 2 } : (a || b || { lat: 47.32, lon: 8.54 });
-  const params = new URLSearchParams({ center: `${c.lon},${c.lat}`, zoom: "11", line: lineOf(conn) });
-  if (embed) params.set("embed", "1");
+  const params = new URLSearchParams({ center: `${c.lon},${c.lat}`, zoom: "12", line: lineOf(conn) });
+  if (embed) { params.set("embed", "1"); params.set("solo", "1"); }
   const num = trainNumberOf(conn);
   if (num) params.set("trainno", num);
   return `${RADAR_PAGE}?${params.toString()}`;
