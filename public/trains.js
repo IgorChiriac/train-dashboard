@@ -17,6 +17,13 @@
 const QS = new URLSearchParams(location.search);
 const MOCK = QS.has("mock");
 const DEBUG = QS.has("debug");
+// Embed mode: the commute board mounts this page in an iframe as a "live view"
+// for a picked train. `embed` strips the page chrome, `center`/`zoom` frame the
+// commute corridor instead of auto-locating, and `trainno` (with `line`) tells
+// us which vehicle to auto-follow once it shows up in the feed.
+const EMBED = QS.has("embed");
+const FOCUS_TRAINNO = (QS.get("trainno") || "").replace(/\D/g, "") || null;
+const FOCUS_LINE = (QS.get("line") || "").replace(/\s+/g, "").toUpperCase() || null;
 
 // Keys are never committed to the repo: ?key= / ?otdkey= are persisted to
 // localStorage on first visit, after which plain trains.html works.
@@ -45,7 +52,14 @@ const FALLBACK_STYLE = {
   layers: [{ id: "bg", type: "background", paint: { "background-color": "#0d1428" } }],
 };
 
-const START = { center: [8.54, 47.32], zoom: 10 }; // Zürichsee, matches the commute
+// Zürichsee by default; the board overrides via ?center=lng,lat&zoom= to frame
+// the picked train's corridor.
+const START = (() => {
+  const c = (QS.get("center") || "").split(",").map(Number);
+  const z = Number(QS.get("zoom"));
+  const center = c.length === 2 && c.every(Number.isFinite) ? c : [8.54, 47.32];
+  return { center, zoom: Number.isFinite(z) && z > 0 ? z : 10 };
+})();
 const PING_MS = 10_000;
 const STALE_MS = 60_000;
 const BBOX_DEBOUNCE_MS = 250;
@@ -180,9 +194,25 @@ function upsertTrajectory(feature) {
     rec.screen = null;
     if (rec.state === "JOURNEY_CANCELLED") vehicles.delete(rec.id);
     else vehicles.set(rec.id, rec);
+    maybeFollowFocus(rec);
   } catch (err) {
     if (DEBUG) console.warn("bad trajectory", err, feature);
   }
+}
+
+// When the board embeds us to follow a specific commute train, latch onto the
+// first vehicle whose run number matches (line as a tie-breaker), select it so
+// its route/stops/status panel opens, and centre the map on it — once.
+let focusLatched = false;
+function maybeFollowFocus(rec) {
+  if (focusLatched || !FOCUS_TRAINNO) return;
+  const num = String(rec.trainNumber == null ? "" : rec.trainNumber).replace(/\D/g, "");
+  if (!num || num !== FOCUS_TRAINNO) return;
+  if (FOCUS_LINE && String(rec.name || "").replace(/\s+/g, "").toUpperCase() !== FOCUS_LINE) return;
+  focusLatched = true;
+  select(rec.id);
+  const pos = positionAt(rec, Date.now());
+  if (pos && map) map.easeTo({ center: [pos.lng, pos.lat], zoom: Math.max(map.getZoom(), 13), duration: 800 });
 }
 
 function purgeStale(now) {
@@ -488,6 +518,9 @@ function setupGeolocation() {
   // First visit (pref unset) prompts; afterwards it's silent until they opt out.
   map.on("load", () => {
     if (MOCK) return;
+    // Embedded/following a specific train → stay framed on the commute corridor,
+    // don't yank the view to the user's GPS location.
+    if (EMBED || FOCUS_TRAINNO) return;
     if (localStorage.getItem("radar-geolocate") === "off") return;
     try {
       geolocateCtl.trigger();
@@ -1413,6 +1446,8 @@ function toggleMode(mode) {
 }
 
 /* ------------------------------------------------------------------ boot */
+
+if (EMBED) document.body.classList.add("embed");
 
 if (!MOCK && !GEOPS_KEY) {
   setLive("error", "NO KEY");

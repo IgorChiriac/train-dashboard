@@ -11,8 +11,10 @@ and highlights the **quick S2** so you can spot it at a glance.
 - ⚡ **S2 highlighting** — the fast S2 connections get a green card and a "Quick S2" badge.
 - ⏱ **Live countdowns** — each departure shows minutes-to-go, ticking every second, with a "go!" warning at ≤ 2 min and "now" when departing.
 - 🎯 **Pick a train** — tap any departure to focus it and watch a live `mm:ss` timer of the time left to catch it.
+- 🛰 **Live view** — on a picked train, tap “Live view” for a full-screen screen with a big live countdown, its status (on time / late / cancelled / direction), the door-to-door details, and the **train itself moving on the radar map** (auto-followed by run number). Reuses the geOps radar in an embedded frame; needs the same free geOps key the radar uses (it degrades to a hint if none is set).
 - 🏃 **Run-for-it / history** — trains past your leave-by time are no longer hidden; they stay on the board flagged "past walk time" (with a "run!" countdown) so you can still sprint for them or see what was available.
 - 🚉 Departure & arrival times, platform, trip duration, transfers, and real-time delays.
+- ✕ **Cancellations** — a cancelled train is shown loudly in red (struck-through line, "✕ Cancelled" chip, "don't leave for this one") instead of quietly counting down and disappearing as "gone". It's never highlighted as the quick S2.
 - 🔄 Auto-refreshes every 60s and whenever you return to the tab.
 - ✏️ Editable **From / To** fields if you ever start from a different station.
 - 📱 Responsive — works on phone and desktop.
@@ -38,6 +40,27 @@ python3 -m http.server 8000
 Departures come from the free, CORS-enabled
 [Swiss public-transport API](https://transport.opendata.ch) (`/v1/connections`),
 which is backed by official SBB / opendata.swiss timetables. No API key required.
+
+### Cancellations
+
+The `transport.opendata.ch` API **does not report cancellations at all** — its
+realtime `Prognosis` only carries platform/arrival/departure/capacity, so a
+cancelled train comes back looking perfectly normal. To surface cancellations
+anyway, the board overlays [search.ch's timetable
+API](https://timetable.search.ch/api/route.json) (which flags cancelled
+departures) purely to mark the matching cards. The overlay is **best-effort and
+fail-safe**: any error — network, CORS, schema drift, or no match — simply leaves
+every train un-flagged, so the board never regresses and never invents a
+cancellation. Matching keys on the local departure time + line, which assumes the
+browser runs in Switzerland's timezone (true for this commute board).
+
+> **Authoritative alternative:** the live **radar** (`trains.html`) uses the geOps
+> realtime feed (the source behind SBB's official train map), which reports
+> cancellations directly — a `JOURNEY_CANCELLED` journey state and a per-stop
+> `cancelled` flag. That's the more reliable long-term source for the board too,
+> but it's a websocket vehicle feed that needs the geOps API key and a
+> timetable-to-journey match, so the lighter keyless search.ch overlay is used
+> here.
 
 ## Notes
 

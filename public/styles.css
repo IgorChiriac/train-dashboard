@@ -143,6 +143,24 @@ body {
   opacity: 0.5;
   filter: saturate(0.6);
 }
+/* Cancelled — SBB pulled this train. Shown loudly (not hidden or dimmed) so you
+   never head out for a train that won't run. Overrides the "quick S2" look. */
+.card--cancelled {
+  border-color: var(--danger);
+  background: linear-gradient(135deg, rgba(255, 107, 107, 0.12), var(--card));
+  box-shadow: 0 10px 30px rgba(255, 107, 107, 0.18);
+}
+.card--cancelled .line {
+  background: rgba(255, 107, 107, 0.16);
+  border-color: var(--danger);
+  color: var(--danger);
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+.card--cancelled .dep-time {
+  text-decoration: line-through;
+  text-decoration-color: var(--danger);
+}
 /* The train you've decided on. */
 .card--selected {
   border-color: var(--accent);
@@ -223,6 +241,7 @@ body {
   letter-spacing: 0.08em;
 }
 .countdown--now .countdown__min { color: var(--danger); }
+.countdown--cancelled .countdown__min { color: var(--danger); }
 .countdown--boarding .countdown__min { color: var(--accent); }
 .countdown--run .countdown__min { color: var(--accent); }
 .countdown--walking .countdown__min { color: var(--accent-soft); }
@@ -265,6 +284,8 @@ body {
 .catch-timer--gone .catch-timer__clock { color: var(--muted); }
 .catch-timer--walking { border-color: var(--accent-soft); }
 .catch-timer--walking .catch-timer__clock { color: var(--accent-soft); }
+.catch-timer--cancelled { border-color: var(--danger); }
+.catch-timer--cancelled .catch-timer__clock { color: var(--danger); }
 
 /* "I'm walking" toggle */
 .walk-toggle {
@@ -501,12 +522,183 @@ body {
   white-space: nowrap;
 }
 .chip--late { color: #2a0d0d; background: var(--danger); }
+.chip--cancelled { color: #2a0d0d; background: var(--danger); font-weight: 800; }
 .chip--ontime { color: var(--accent-soft); background: rgba(61, 220, 132, 0.14); }
 .chip--run { color: #1a1300; background: var(--accent); }
 .chip--walking { color: #06210f; background: var(--accent-soft); }
 
 .details__meta strong { color: var(--text); }
 .details__meta .dot { margin: 0 7px; opacity: 0.5; }
+
+/* in-card actions row (Live view + I'm walking) */
+.catch-timer__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.focus-open-btn {
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.focus-open-btn:hover { background: rgba(255, 210, 63, 0.12); }
+
+/* ---------- focus (live-view) full-screen ---------- */
+
+body.focus-open { overflow: hidden; }
+
+.focus {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(6, 10, 22, 0.82);
+  backdrop-filter: blur(6px);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.focus[hidden] { display: none; }
+
+.focus__sheet {
+  width: 100%;
+  max-width: 560px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.focus--cancelled .focus__sheet { border-color: var(--danger); }
+
+.focus__head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+.focus__route {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.15rem;
+  font-weight: 800;
+  min-width: 0;
+}
+.focus__route span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.focus__close {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  font-size: 1rem;
+  cursor: pointer;
+}
+.focus__close:hover { border-color: var(--accent); }
+
+.focus__hero {
+  text-align: center;
+  padding: 20px 12px 22px;
+  border-radius: 16px;
+  background: radial-gradient(600px 300px at 50% -40%, rgba(61, 220, 132, 0.12), transparent 70%), var(--card);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.focus__timer {
+  font-size: clamp(3.2rem, 18vw, 5rem);
+  font-weight: 900;
+  line-height: 0.95;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--accent-soft);
+}
+.focus__timer--ok { color: var(--accent-soft); }
+.focus__timer--boarding { color: var(--accent); }
+.focus__timer--run { color: var(--accent); }
+.focus__timer--walking { color: var(--accent-soft); }
+.focus__timer--gone { color: var(--muted); }
+.focus__timer--cancelled { color: var(--danger); }
+.focus__timerlabel {
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.focus__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 2px;
+}
+.focus__dir { color: var(--muted); font-size: 0.85rem; font-weight: 600; }
+.focus__hero .walk-toggle { margin-top: 6px; }
+
+.focus__meta {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 14px;
+}
+.focus__mrow {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.focus__mrow dt { color: var(--muted); font-size: 0.8rem; }
+.focus__mrow dd { margin: 0; font-size: 0.9rem; }
+
+.focus__mapwrap { display: flex; flex-direction: column; gap: 8px; }
+.focus__maphead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.focus__maplink { color: var(--accent); text-decoration: none; text-transform: none; letter-spacing: 0; }
+.focus__map {
+  position: relative;
+  height: 300px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+.focus__mapframe { width: 100%; height: 100%; border: 0; display: block; }
+.focus__maphint {
+  margin: 0;
+  padding: 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+.focus__maphint[hidden] { display: none; }
+.focus__maphint a { color: var(--accent); }
+
+@media (max-width: 420px) {
+  .focus__meta { grid-template-columns: 1fr; }
+  .focus__map { height: 240px; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .live__dot, .btn__spinner, .refresh-bar { animation: none !important; }

@@ -17,7 +17,7 @@
 
   <link rel="preconnect" href="https://transport.opendata.ch" />
   <link rel="preconnect" href="https://api.open-meteo.com" />
-  <link rel="stylesheet" href="styles.css?v=11" />
+  <link rel="stylesheet" href="styles.css?v=13" />
 </head>
 <body>
   <div id="refreshBar" class="refresh-bar" aria-hidden="true"></div>
@@ -29,7 +29,7 @@
         <span class="route__arrow">→</span>
         <span class="route__to" id="toLabel">Office</span>
       </div>
-      <p class="subtitle">Door-to-door · the quick <strong>S2</strong> is highlighted · tap a train for a catch timer</p>
+      <p class="subtitle">Door-to-door · the quick <strong>S2</strong> is highlighted · tap a train, then “Live view” for the timer + map</p>
       <p id="journeyLine" class="journey">—</p>
       <div class="livebar">
         <span id="liveDot" class="live live--ok">
@@ -72,6 +72,40 @@
     </footer>
   </main>
 
-  <script src="app.js?v=11"></script>
+  <!-- Full-screen focus view for the picked train: big live timer + status +
+       the live train on the radar map. Populated & toggled by app.js. -->
+  <div id="focus" class="focus" hidden role="dialog" aria-modal="true" aria-label="Selected train — live view">
+    <div class="focus__sheet">
+      <header class="focus__head">
+        <span id="focusLine" class="line">S2</span>
+        <div class="focus__route">
+          <span id="focusFrom">—</span>
+          <span class="route__arrow">→</span>
+          <span id="focusTo">—</span>
+        </div>
+        <button id="focusClose" class="focus__close" type="button" aria-label="Close live view">✕</button>
+      </header>
+
+      <div id="focusHero" class="focus__hero">
+        <div id="focusTimer" class="focus__timer">--:--</div>
+        <div id="focusTimerLabel" class="focus__timerlabel">—</div>
+        <div id="focusStatus" class="focus__status"></div>
+        <button id="focusWalk" class="walk-toggle" data-action="walk" type="button" aria-pressed="false">🚶 I’m walking</button>
+      </div>
+
+      <dl id="focusMeta" class="focus__meta"></dl>
+
+      <div class="focus__mapwrap">
+        <div class="focus__maphead">
+          <span>🛰 Live train</span>
+          <a id="focusMapLink" class="focus__maplink" href="trains.html" target="_blank" rel="noopener">Open full radar ↗</a>
+        </div>
+        <div id="focusMap" class="focus__map"><!-- radar iframe mounted here --></div>
+        <p id="focusMapHint" class="focus__maphint" hidden></p>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=13"></script>
 </body>
 </html>
