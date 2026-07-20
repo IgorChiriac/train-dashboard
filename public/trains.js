@@ -779,7 +779,24 @@ function frame() {
   // Solo mode: once a train is selected, everything else is hidden — the live
   // view is about that one train. (Before a selection exists we still draw all,
   // so a failed auto-match doesn't leave an empty map — you can tap yours.)
-  const solo = SOLO && selectedId != null;
+  // Guard against a blank map: if the chosen train isn't on-screen right now,
+  // either gently pull it back (auto-follow) or, if the user has panned away,
+  // drop solo for this frame and show everyone rather than nothing.
+  let solo = SOLO && selectedId != null && vehicles.has(selectedId);
+  if (solo) {
+    const sv = vehicles.get(selectedId);
+    const sp = isVisibleMode(sv) ? positionAt(sv, now) : null;
+    const spt = sp && Math.abs(sp.lat) <= 72 ? map.project([sp.lng, sp.lat]) : null;
+    const onScreen = spt && spt.x > -40 && spt.y > -40 && spt.x < w + 40 && spt.y < h + 40;
+    if (!onScreen) {
+      if (sp && !followPaused && now - lastFollowAt > 1500) {
+        lastFollowAt = now;
+        map.easeTo({ center: [sp.lng, sp.lat], duration: 800 });
+      } else {
+        solo = false; // panned away or no fix yet → show all, never blank
+      }
+    }
+  }
 
   for (const v of vehicles.values()) {
     if (!isVisibleMode(v) || (solo && v.id !== selectedId)) {
@@ -890,6 +907,7 @@ function select(id) {
   renderPanelSkeleton(v);
   openPanel();
   subscribeSelected(id);
+  if (v) postFocusStatus(v, null, v.delayMin); // seed the parent's live status now
   clearInterval(panelTimer);
   panelTimer = setInterval(refreshPanelLive, 1000);
 }
@@ -1033,6 +1051,31 @@ function refreshPanelLive() {
         : el("span", "delay-ok", "on time")
     );
   }
+  postFocusStatus(v, seq, delay);
+}
+
+// When embedded as the board's live view, stream the selected train's live geOps
+// status up to the parent so the focus screen can show a real delay/cancellation
+// even when the timetable API returns no realtime for it.
+function postFocusStatus(v, seq, delayMin) {
+  if (!EMBED || typeof window === "undefined" || window.parent === window) return;
+  const stations = (seq && seq.stations) || [];
+  const cancelled = stations.some((s) => s && s.cancelled);
+  let nextStop = "";
+  for (const s of stations) {
+    const ref = s.departureTime || s.arrivalTime || s.aimedDepartureTime || s.aimedArrivalTime;
+    if (ref && ref > Date.now()) { nextStop = s.stationName || s.name || ""; break; }
+  }
+  try {
+    window.parent.postMessage({
+      type: "radar:train",
+      trainno: v.trainNumber || null,
+      line: v.name || "",
+      delayMin: typeof delayMin === "number" ? delayMin : null,
+      cancelled,
+      nextStop,
+    }, location.origin);
+  } catch (_) { /* cross-origin / detached — ignore */ }
 }
 
 function renderPanel(seq) {

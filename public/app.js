@@ -115,6 +115,10 @@ let selectedKey = null;
 // The full-screen "Live view" for the picked train is open. It always mirrors
 // the currently selected train; closing it doesn't clear the selection.
 let focusOpen = false;
+// Latest live status posted up from the embedded radar (geOps) for the followed
+// train: { delayMin, cancelled, line, nextStop }. Gives the focus screen a real
+// delay even when the timetable API has no realtime for that train. Reset per open.
+let focusLive = null;
 // "I'm walking": you've left the door, so stop the dramatic leave-by countdown
 // and calmly count down to the train leaving instead. Only meaningful for the
 // selected train; reset whenever the selection changes.
@@ -626,6 +630,7 @@ function openFocus() {
   const conn = focusConn();
   if (!conn) return;
   focusOpen = true;
+  focusLive = null; // fresh train → wait for its live status
   els.focus.hidden = false;
   document.body.classList.add("focus-open");
   focusMapFor = null; // force a fresh mount for this train
@@ -635,11 +640,21 @@ function openFocus() {
 
 function closeFocus() {
   focusOpen = false;
+  focusLive = null;
   els.focus.hidden = true;
   document.body.classList.remove("focus-open");
   els.focusMap.replaceChildren(); // tear down the iframe → stops its websocket
   focusMapFor = null;
 }
+
+// Live status from the embedded radar (geOps) for the followed train.
+window.addEventListener("message", (e) => {
+  if (e.origin !== location.origin) return; // only trust our own iframe
+  const d = e.data;
+  if (!d || d.type !== "radar:train") return;
+  focusLive = d;
+  if (focusOpen) renderFocus();
+});
 
 function metaRow(term, val) {
   return val ? `<div class="focus__mrow"><dt>${term}</dt><dd>${val}</dd></div>` : "";
@@ -658,8 +673,13 @@ function renderFocus() {
   const p = path();
   const now = Date.now();
   const dep = departureDate(conn);
-  const cancelled = isCancelled(conn);
-  const delay = delayMinutes(conn);
+  // Realtime: prefer the geOps live status streamed up from the embedded radar
+  // (it has delays the timetable API usually omits); fall back to the timetable.
+  const liveDelay = focusLive && typeof focusLive.delayMin === "number" ? focusLive.delayMin : null;
+  const cancelled = isCancelled(conn) || !!(focusLive && focusLive.cancelled);
+  const ttDelay = delayMinutes(conn);
+  const delay = liveDelay != null ? liveDelay : ttDelay;
+  const haveRealtime = liveDelay != null || hasPrognosis(conn);
   const msToDep = dep.getTime() - now;
   const leaveBy = new Date(dep.getTime() - p.origin.walk * 60000);
   const msToLeave = leaveBy.getTime() - now;
@@ -692,13 +712,16 @@ function renderFocus() {
   els.focusTimer.className = `focus__timer focus__timer--${state}`;
   els.focusTimerLabel.textContent = label;
 
-  // status chip
+  // status chip — a "· live" tag when the number came from the geOps feed
   let chip = "";
+  const liveTag = liveDelay != null ? ` <span class="focus__livetag">live</span>` : "";
   if (cancelled) chip = `<span class="chip chip--cancelled">✕ Cancelled</span>`;
-  else if (delay > 0) chip = `<span class="chip chip--late">+${delay}′ late</span>`;
-  else if (hasPrognosis(conn)) chip = `<span class="chip chip--ontime">on time</span>`;
+  else if (delay > 0) chip = `<span class="chip chip--late">+${delay}′ late${liveTag}</span>`;
+  else if (haveRealtime) chip = `<span class="chip chip--ontime">on time${liveTag}</span>`;
+  else chip = `<span class="chip chip--pending">waiting for live…</span>`;
   const dir = directionOf(conn);
-  els.focusStatus.innerHTML = chip + (dir ? `<span class="focus__dir">→ ${dir}</span>` : "");
+  const next = focusLive && focusLive.nextStop ? `<span class="focus__dir">📍 next: ${focusLive.nextStop}</span>` : "";
+  els.focusStatus.innerHTML = chip + (dir ? `<span class="focus__dir">→ ${dir}</span>` : "") + next;
 
   // walk toggle (meaningless once cancelled/departed)
   const walkable = !cancelled && !departed;
