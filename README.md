@@ -41,6 +41,16 @@ Departures come from the free, CORS-enabled
 [Swiss public-transport API](https://transport.opendata.ch) (`/v1/connections`),
 which is backed by official SBB / opendata.swiss timetables. No API key required.
 
+**Resilience / fallback.** `transport.opendata.ch` is rate-limited (HTTP 429)
+and is itself backed by [search.ch](https://timetable.search.ch). The board
+already calls search.ch on every load (for cancellations), so it doubles as a
+**fallback timetable**: both providers are queried in parallel (each with an
+8-second timeout), opendata is preferred, and if it doesn't answer — a 429, an
+outage, or an empty result — the board runs on search.ch's `route.json` instead
+(which also carries real-time delays). The status line shows “· via search.ch”
+when the fallback is in use; only if *both* providers fail does the board show an
+error.
+
 ### Cancellations
 
 The `transport.opendata.ch` API **does not report cancellations at all** — its

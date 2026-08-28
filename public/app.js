@@ -284,17 +284,88 @@ function parseCancellations(data) {
   return set;
 }
 
-// Fetch + flag. Never throws: on any failure it returns an empty set so the
-// board simply shows no cancellations rather than breaking or guessing.
-async function fetchCancellations(from, to) {
+// GET JSON with a hard timeout so one slow/hung provider (opendata.ch is
+// frequently rate-limited) can't block the other. Throws on !ok or timeout.
+async function fetchJson(url, ms = 8000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
   try {
-    const res = await fetch(buildCancelUrl(from, to));
+    const res = await fetch(url, { signal: ctrl.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return parseCancellations(await res.json());
-  } catch (err) {
-    console.warn("Cancellation overlay unavailable:", err.message);
-    return new Set();
+    return await res.json();
+  } finally {
+    clearTimeout(t);
   }
+}
+
+/* ---------- search.ch as a fallback timetable ----------
+   transport.opendata.ch is rate-limited (HTTP 429) and is itself backed by
+   search.ch, so when it doesn't answer we fall back to search.ch's route.json —
+   which we already fetch for cancellations, and which carries real delays. This
+   maps a search.ch response into the same connection shape the board renders. */
+
+// search.ch local "YYYY-MM-DD HH:MM:SS" → an offset-less ISO string the browser
+// parses in its own (Swiss) timezone, matching how opendata times render.
+function searchTimeToIso(s) {
+  if (!s) return null;
+  return String(s).trim().replace(" ", "T");
+}
+function secondsToIsoDuration(sec) {
+  const s = Math.max(0, Math.round(Number(sec) || 0));
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60), ss = s % 60;
+  const p2 = (n) => String(n).padStart(2, "0");
+  return `${p2(d)}d${p2(h)}:${p2(m)}:${p2(ss)}`;
+}
+// "+2"/"-1"/"" → minutes (number); "X" → the cancelled sentinel; null if absent.
+function searchDelay(v) {
+  if (v == null || v === "") return null;
+  const str = String(v).trim().toUpperCase();
+  if (str === "X") return "X";
+  const m = str.match(/-?\d+/);
+  return m ? parseInt(m[0], 10) : 0;
+}
+function legIsCancelled(l) {
+  return !!l && (l.cancelled === true || searchDelay(l.dep_delay) === "X" || searchDelay(l.arr_delay) === "X");
+}
+
+function mapSearchConnections(data) {
+  const out = [];
+  for (const c of (data && data.connections) || []) {
+    const legs = Array.isArray(c.legs) ? c.legs : [];
+    const travel = legs.filter((l) => l && l.line); // legs actually on a vehicle
+    const first = travel[0];
+    const depStr = (first && first.departure) || c.departure;
+    if (!first || !depStr) continue;
+
+    const d = searchDelay(first.dep_delay);
+    const cancelled = c.cancelled === true || legs.some(legIsCancelled);
+    const arrStr = c.arrival || (first.exit && first.exit.arrival) ||
+      (legs.length && legs[legs.length - 1].arrival) || null;
+
+    const conn = {
+      from: {
+        departure: searchTimeToIso(depStr),
+        delay: typeof d === "number" ? d : 0,
+        platform: first.track || first.departure_track || "",
+        prognosis: { departure: null },
+        station: { name: first.stopname || first.name || "" },
+      },
+      to: {
+        arrival: searchTimeToIso(arrStr),
+        station: { name: (first.exit && first.exit.name) || "" },
+      },
+      duration: secondsToIsoDuration(c.duration),
+      transfers: Math.max(0, travel.length - 1),
+      products: [first.line],
+      sections: travel.map((l) => ({
+        journey: { name: l.line, number: l.number != null ? String(l.number) : "", to: l.terminal || "" },
+      })),
+    };
+    if (cancelled) conn._cancelled = true;
+    out.push(conn);
+  }
+  return out;
 }
 
 function departureDate(conn) {
@@ -499,44 +570,69 @@ async function loadDepartures() {
 
   setLive("loading");
   els.status.textContent = "Syncing departures…";
-  try {
-    const res = await fetch(buildUrl(p.origin.station, p.dest.station));
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    connections = (data.connections || [])
+
+  // Hit both providers at once: opendata.ch is primary, but it's rate-limited
+  // and backed by search.ch, so search.ch doubles as the fallback timetable AND
+  // the cancellation/real-delay overlay. Whichever answers, the board still runs.
+  const [odRes, schRes] = await Promise.allSettled([
+    fetchJson(buildUrl(p.origin.station, p.dest.station)),
+    fetchJson(buildCancelUrl(p.origin.station, p.dest.station)),
+  ]);
+  const odData = odRes.status === "fulfilled" ? odRes.value : null;
+  const schData = schRes.status === "fulfilled" ? schRes.value : null;
+  if (odRes.status === "rejected") console.warn("opendata.ch unavailable:", odRes.reason && odRes.reason.message);
+  if (schRes.status === "rejected") console.warn("search.ch unavailable:", schRes.reason && schRes.reason.message);
+
+  let conns = [];
+  let source = "";
+  if (odData && Array.isArray(odData.connections) && odData.connections.length) {
+    conns = odData.connections
       .filter((c) => c.from && c.from.departure)
-      .filter((c) => (c.transfers || 0) === 0); // direct only
-    lastFetchOk = true;
+      .filter((c) => (c.transfers || 0) === 0);
+    source = "opendata";
+  }
+  if (!conns.length && schData) {
+    // opendata down/empty → run on search.ch (comes with real delays + cancels).
+    conns = mapSearchConnections(schData).filter((c) => (c.transfers || 0) === 0);
+    source = "search.ch";
+  }
 
-    // Overlay cancellations from search.ch (fail-safe: no flags on any error).
-    const cancelled = await fetchCancellations(p.origin.station, p.dest.station);
-    if (cancelled.size) {
-      connections.forEach((c) => {
-        const key = cancelKeyForConn(c);
-        if (key && cancelled.has(key)) c._cancelled = true;
-      });
-    }
-
-    render();
-    const offline = !navigator.onLine;
-    setLive(offline ? "error" : "ok");
-    els.status.classList.remove("status--error");
-    els.updated.textContent = `updated ${formatClockSec(new Date())}`;
-    const cancelledCount = connections.filter(isCancelled).length;
-    const cancelNote = cancelledCount ? ` · ${cancelledCount} cancelled` : "";
-    els.status.textContent = offline
-      ? `${connections.length} trains · offline (cached)${cancelNote}`
-      : `${connections.length} trains · auto-refresh 60s${cancelNote}`;
-    restartRefreshBar();
-  } catch (err) {
-    console.error(err);
+  if (!conns.length) {
     lastFetchOk = false;
     setLive("error");
     els.status.classList.add("status--error");
     els.status.textContent = navigator.onLine
-      ? `Couldn't reach the timetable (${err.message}). Retrying…`
-      : `Offline — no cached departures yet.`;
+      ? "Timetable unavailable right now (both providers). Retrying…"
+      : "Offline — no cached departures yet.";
+    return;
   }
+
+  // Overlay cancellations from search.ch onto opendata connections. (search.ch
+  // connections already carry _cancelled from the mapping.)
+  if (source === "opendata" && schData) {
+    const cancelled = parseCancellations(schData);
+    if (cancelled.size) {
+      conns.forEach((c) => {
+        const key = cancelKeyForConn(c);
+        if (key && cancelled.has(key)) c._cancelled = true;
+      });
+    }
+  }
+
+  connections = conns;
+  lastFetchOk = true;
+  render();
+  const offline = !navigator.onLine;
+  setLive(offline ? "error" : "ok");
+  els.status.classList.remove("status--error");
+  els.updated.textContent = `updated ${formatClockSec(new Date())}`;
+  const cancelledCount = connections.filter(isCancelled).length;
+  const cancelNote = cancelledCount ? ` · ${cancelledCount} cancelled` : "";
+  const srcNote = source === "search.ch" ? " · via search.ch" : "";
+  els.status.textContent = offline
+    ? `${connections.length} trains · offline (cached)${cancelNote}`
+    : `${connections.length} trains · auto-refresh 60s${cancelNote}${srcNote}`;
+  restartRefreshBar();
 }
 
 function render() {
