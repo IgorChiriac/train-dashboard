@@ -24,6 +24,9 @@ const DEBUG = QS.has("debug");
 const EMBED = QS.has("embed");
 const FOCUS_TRAINNO = (QS.get("trainno") || "").replace(/\D/g, "") || null;
 const FOCUS_LINE = (QS.get("line") || "").replace(/\s+/g, "").toUpperCase() || null;
+// Solo: once a train is selected, show ONLY it on the map (hide every other
+// vehicle) and keep it framed as it moves. Used by the board's live view.
+const SOLO = QS.has("solo");
 
 // Keys are never committed to the repo: ?key= / ?otdkey= are persisted to
 // localStorage on first visit, after which plain trains.html works.
@@ -471,6 +474,8 @@ async function initMap() {
   map.on("moveend", queueBbox);
   map.on("zoomend", queueBbox);
   map.on("click", onMapClick);
+  // A manual pan means "let me look around" — stop auto-following from here on.
+  map.on("dragstart", () => { followPaused = true; });
 
   resizeCanvas();
   window.addEventListener("resize", resizeCanvas);
@@ -737,6 +742,9 @@ let rafId = null;
 let frameNo = 0;
 let lastPurge = 0;
 let lastCount = 0;
+// Solo-follow: keep the selected train framed, but back off once the user pans.
+let followPaused = false;
+let lastFollowAt = 0;
 
 function startLoop() {
   if (rafId == null) rafId = requestAnimationFrame(frame);
@@ -768,8 +776,30 @@ function frame() {
   let selected = null;
   let shown = 0;
 
+  // Solo mode: once a train is selected, everything else is hidden — the live
+  // view is about that one train. (Before a selection exists we still draw all,
+  // so a failed auto-match doesn't leave an empty map — you can tap yours.)
+  // Guard against a blank map: if the chosen train isn't on-screen right now,
+  // either gently pull it back (auto-follow) or, if the user has panned away,
+  // drop solo for this frame and show everyone rather than nothing.
+  let solo = SOLO && selectedId != null && vehicles.has(selectedId);
+  if (solo) {
+    const sv = vehicles.get(selectedId);
+    const sp = isVisibleMode(sv) ? positionAt(sv, now) : null;
+    const spt = sp && Math.abs(sp.lat) <= 72 ? map.project([sp.lng, sp.lat]) : null;
+    const onScreen = spt && spt.x > -40 && spt.y > -40 && spt.x < w + 40 && spt.y < h + 40;
+    if (!onScreen) {
+      if (sp && !followPaused && now - lastFollowAt > 1500) {
+        lastFollowAt = now;
+        map.easeTo({ center: [sp.lng, sp.lat], duration: 800 });
+      } else {
+        solo = false; // panned away or no fix yet → show all, never blank
+      }
+    }
+  }
+
   for (const v of vehicles.values()) {
-    if (!isVisibleMode(v)) {
+    if (!isVisibleMode(v) || (solo && v.id !== selectedId)) {
       v.screen = null;
       continue;
     }
@@ -799,6 +829,15 @@ function frame() {
     ctx.lineWidth = 2.5;
     ctx.stroke();
     drawVehicle(selected.v, selected.pos, selected.pt, bucket);
+
+    // Keep the followed train in frame as it moves: re-centre when it drifts out
+    // of the middle half of the view, throttled, and only until the user pans.
+    if (SOLO && !followPaused && now - lastFollowAt > 1500) {
+      if (Math.abs(selected.pt.x - w / 2) > w * 0.25 || Math.abs(selected.pt.y - h / 2) > h * 0.25) {
+        lastFollowAt = now;
+        map.easeTo({ center: [selected.pos.lng, selected.pos.lat], duration: 900 });
+      }
+    }
   }
 
   if (frameNo % 30 === 0 && shown !== lastCount) {
@@ -863,10 +902,12 @@ function select(id) {
   selectedId = id;
   selectedSeq = null;
   routeKm = null;
+  if (SOLO && toastEl) toastEl.hidden = true; // locked on — drop the "locating" hint
   const v = vehicles.get(id);
   renderPanelSkeleton(v);
   openPanel();
   subscribeSelected(id);
+  if (v) postFocusStatus(v, null, v.delayMin); // seed the parent's live status now
   clearInterval(panelTimer);
   panelTimer = setInterval(refreshPanelLive, 1000);
 }
@@ -1010,6 +1051,31 @@ function refreshPanelLive() {
         : el("span", "delay-ok", "on time")
     );
   }
+  postFocusStatus(v, seq, delay);
+}
+
+// When embedded as the board's live view, stream the selected train's live geOps
+// status up to the parent so the focus screen can show a real delay/cancellation
+// even when the timetable API returns no realtime for it.
+function postFocusStatus(v, seq, delayMin) {
+  if (!EMBED || typeof window === "undefined" || window.parent === window) return;
+  const stations = (seq && seq.stations) || [];
+  const cancelled = stations.some((s) => s && s.cancelled);
+  let nextStop = "";
+  for (const s of stations) {
+    const ref = s.departureTime || s.arrivalTime || s.aimedDepartureTime || s.aimedArrivalTime;
+    if (ref && ref > Date.now()) { nextStop = s.stationName || s.name || ""; break; }
+  }
+  try {
+    window.parent.postMessage({
+      type: "radar:train",
+      trainno: v.trainNumber || null,
+      line: v.name || "",
+      delayMin: typeof delayMin === "number" ? delayMin : null,
+      cancelled,
+      nextStop,
+    }, location.origin);
+  } catch (_) { /* cross-origin / detached — ignore */ }
 }
 
 function renderPanel(seq) {
@@ -1448,6 +1514,9 @@ function toggleMode(mode) {
 /* ------------------------------------------------------------------ boot */
 
 if (EMBED) document.body.classList.add("embed");
+// Solo view: hint that we're locking onto the picked train (cleared on select).
+// If the auto-match ever misses, this tells the user they can just tap it.
+if (EMBED && SOLO && !MOCK) toast("Locating your train — tap it if the map doesn’t jump.", 0);
 
 if (!MOCK && !GEOPS_KEY) {
   setLive("error", "NO KEY");

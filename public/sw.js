@@ -1,5 +1,5 @@
 /* Service worker for the S2 Board PWA. */
-const CACHE = "s2board-v14";
+const CACHE = "s2board-v17";
 const SHELL = [
   "./",
   "index.html",

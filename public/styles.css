@@ -645,6 +645,14 @@ body.focus-open { overflow: hidden; }
   margin-top: 2px;
 }
 .focus__dir { color: var(--muted); font-size: 0.85rem; font-weight: 600; }
+.focus__livetag {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+.chip--pending { color: var(--muted); background: rgba(151, 161, 196, 0.14); }
 .focus__hero .walk-toggle { margin-top: 6px; }
 
 .focus__meta {
