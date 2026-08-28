@@ -600,22 +600,16 @@ function mountFocusMap() {
   const conn = focusConn();
   if (!conn) return;
   els.focusMapLink.href = radarSrc(conn, false);
-  // Already resolved for this train (iframe mounted OR no-key hint shown)? Leave
-  // it — rebuilding each tick would reset the map/socket every second.
-  if (focusMapFor === selectedKey && (els.focusMap.firstChild || !els.focusMapHint.hidden)) return;
+  // Already mounted for this train? Leave it — rebuilding each tick would reset
+  // the map and its websocket every second.
+  if (focusMapFor === selectedKey && els.focusMap.firstChild) return;
   focusMapFor = selectedKey;
 
-  // No geOps key stored (by the radar) → the embedded map can't stream. Show a
-  // helpful hint instead of an iframe that just nags for a key.
-  const hasKey = (() => { try { return !!localStorage.getItem("radar-geops-key"); } catch (_) { return false; } })();
-  if (!hasKey) {
-    els.focusMap.replaceChildren();
-    els.focusMapHint.hidden = false;
-    els.focusMapHint.innerHTML =
-      `Add a free <a href="https://developer.geops.io" target="_blank" rel="noopener">geOps key</a> to the ` +
-      `<a href="${radarSrc(conn, false)}">live map</a> once and it shows here too.`;
-    return;
-  }
+  // Always mount the radar iframe and let it sort out the key: the deployed
+  // radar has the geOps key baked in at build time (see inject-keys.js), which
+  // this parent page can't see — so we must NOT gate on a localStorage key, or
+  // the live map (and the live delays it posts back) would never show. If there
+  // genuinely is no key anywhere, the embedded radar shows its own key prompt.
   els.focusMapHint.hidden = true;
   const iframe = document.createElement("iframe");
   iframe.className = "focus__mapframe";
